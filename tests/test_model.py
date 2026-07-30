@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
 from tinyintent import Example, HashingEncoder, IntentModel
 
@@ -18,19 +17,10 @@ def make_data(n=10):
     return rows
 
 
-def make_model(risk=0.1, dim=1024):
+def make_model(dim=1024, classifier="exemplar"):
     data = make_data(n=14)
-    model = IntentModel.fit_calibrate(
-        data, encoder=HashingEncoder(dim=dim), risk=risk, calibrate_frac=0.4
-    )
+    model = IntentModel.fit(data, encoder=HashingEncoder(dim=dim), classifier=classifier)
     return model, data
-
-
-def test_uncalibrated_fires_top1():
-    model = IntentModel.fit(make_data(), encoder=HashingEncoder(dim=512))
-    pred = model.predict("alpha alpha request")
-    assert pred.decision == "fire"
-    assert pred.intent == "a"
 
 
 def test_labels_exclude_oos():
@@ -38,58 +28,31 @@ def test_labels_exclude_oos():
     assert model.label_names == ["a", "b", "c"]
 
 
-def test_fires_on_clear_in_scope():
+def test_classify_decides_top1():
+    model, _ = make_model()
+    assert model.classify("alpha alpha request item") == "a"
+    assert model.classify("beta beta request item") == "b"
+
+
+def test_always_decides_never_oos():
+    model, _ = make_model()
+    # Out-of-scope input still gets a best-guess intent, never "oos".
+    pred = model.predict("completely different banana vocabulary here")
+    assert pred.intent in model.label_names
+
+
+def test_predict_ranking_and_explanation():
     model, _ = make_model()
     pred = model.predict("alpha alpha request item extra")
-    assert "a" in {label for label, _ in pred.set_}
     assert pred.intent == "a"
+    assert pred.ranking[0][0] == "a"
+    assert len(pred.ranking) == len(model.label_names)
+    assert pred.explanation is not None
 
 
-def test_abstains_on_out_of_scope():
-    model, _ = make_model()
-    pred = model.predict("completely different banana vocabulary here")
-    assert pred.decision == "abstain"
-    assert pred.set_ == []
-
-
-def test_conformal_coverage_holds():
-    model, data = make_model(risk=0.1)
-    report = model.evaluate(data)
-    assert report.coverage >= 0.85          # target is 1 - risk
-    assert report.oos_false_fire <= 0.15
-
-
-def test_oos_floor_raises_with_negatives():
-    from tinyintent import split
-
-    data = make_data(n=14)
-    fit_set, cal_set = split(data, test_frac=0.4, seed=0)   # cal keeps some oos
-    model = IntentModel.fit(fit_set, encoder=HashingEncoder(dim=1024))
-    model.calibrate(cal_set, risk=0.1, method="lac", use_oos=True)
-
-    assert model.policy.floor > -1.0                        # negatives lifted the floor
-    assert model.predict("alpha alpha request item").intent == "a"  # in-scope still fires
-
-
-def test_aps_gate_abstains_on_out_of_scope():
-    data = make_data(n=14)
-    model = IntentModel.fit_calibrate(
-        data, encoder=HashingEncoder(dim=1024), risk=0.1, method="aps", calibrate_frac=0.4
-    )
-    assert model.policy.name == "aps"
-    assert model.predict("completely different banana vocabulary").decision == "abstain"
-
-
-def test_gate_is_decisive_never_ambiguous():
-    data = make_data(n=14)
-    model = IntentModel.fit_calibrate(
-        data, encoder=HashingEncoder(dim=1024), method="gate", calibrate_frac=0.4
-    )
-    assert model.policy.name == "gate"
-    for query in ["alpha alpha request item", "totally foreign banana words here"]:
-        assert model.predict(query).decision in ("fire", "abstain")  # never ambiguous
-    assert model.predict("alpha alpha request item").decision == "fire"
-    assert model.predict("totally foreign banana words here").decision == "abstain"
+def test_linear_head_accuracy():
+    model, data = make_model(classifier="linear")
+    assert model.accuracy(data) >= 0.9
 
 
 def test_save_load_roundtrip(tmp_path):
@@ -99,7 +62,5 @@ def test_save_load_roundtrip(tmp_path):
     reloaded = IntentModel.load(tmp_path / "m")
     after = reloaded.predict("beta beta request item")
 
-    assert before.decision == after.decision
     assert before.intent == after.intent
-    assert np.isclose(before.top[1], after.top[1], atol=1e-5)
-    assert reloaded.policy.name == model.policy.name
+    assert np.isclose(before.score, after.score, atol=1e-5)

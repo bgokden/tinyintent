@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 
-from tinyintent.data import load_jsonl, split
+from tinyintent.data import load_jsonl
 from tinyintent.encoder import HashingEncoder, SentenceEncoder
 from tinyintent.model import IntentModel
 
@@ -17,24 +17,18 @@ def _make_encoder(name: str):
 
 def cmd_train(args: argparse.Namespace) -> None:
     data = load_jsonl(args.data)
-    fit_set, cal_set = split(data, test_frac=args.calibrate_frac, seed=args.seed)
 
     if args.finetune:
         from tinyintent.finetune import finetune_encoder
         from tinyintent.encoder import DEFAULT_MODEL
 
-        encoder = finetune_encoder(fit_set, out_dir=f"{args.out}/encoder", base_model=DEFAULT_MODEL)
+        encoder = finetune_encoder(data, out_dir=f"{args.out}/encoder", base_model=DEFAULT_MODEL)
     else:
         encoder = _make_encoder(args.encoder)
 
-    model = IntentModel.fit(fit_set, encoder=encoder, classifier=args.classifier)
-    print(f"Trained on {len(fit_set)} examples, {len(model.label_names)} intents "
+    model = IntentModel.fit(data, encoder=encoder, classifier=args.classifier)
+    print(f"Trained on {len(data)} examples, {len(model.label_names)} intents "
           f"(classifier={args.classifier})")
-    if args.method == "none":
-        print("No policy: predict always decides the single best intent")
-    else:
-        policy = model.calibrate(cal_set, risk=args.risk, method=args.method)
-        print(f"Calibrated on {len(cal_set)} using policy '{policy.name}'")
     model.save(args.out)
     print(f"Saved model to {args.out}")
 
@@ -48,10 +42,10 @@ def cmd_evaluate(args: argparse.Namespace) -> None:
 def _show(text: str, model: IntentModel) -> None:
     p = model.predict(text)
     print(f"\n> {text}")
-    print(f"  decision: {p.decision}" + (f"  ->  {p.intent}" if p.intent else ""))
-    set_str = ", ".join(f"{l} {s:.2f}" for l, s in p.set_) or "(empty)"
-    print(f"  prediction set: {set_str}")
-    print(f"  top: {p.top[0]} {p.top[1]:.2f}")
+    print(f"  intent: {p.intent}  ({p.score:.2f})")
+    runners = ", ".join(f"{l} {s:.2f}" for l, s in p.ranking[1:3])
+    if runners:
+        print(f"  runners-up: {runners}")
     if p.explanation:
         print(f"  nearest example: \"{p.explanation['text']}\" "
               f"({p.explanation['similarity']:.2f})")
@@ -78,17 +72,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="tinyintent")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    t = sub.add_parser("train", help="train and calibrate an intent model")
+    t = sub.add_parser("train", help="train an intent model")
     t.add_argument("--data", required=True)
     t.add_argument("--out", required=True)
     t.add_argument("--encoder", default="minilm", choices=["minilm", "hashing"])
-    t.add_argument("--method", default="none", choices=["none", "aps", "lac", "gate"],
-                   help="none = always decide top-1; others add abstain/reject")
     t.add_argument("--classifier", default="linear", choices=["linear", "exemplar"])
     t.add_argument("--finetune", action="store_true", help="contrastively fine-tune the encoder")
-    t.add_argument("--risk", type=float, default=0.1, help="conformal alpha")
-    t.add_argument("--calibrate-frac", type=float, default=0.25)
-    t.add_argument("--seed", type=int, default=0)
     t.set_defaults(func=cmd_train)
 
     e = sub.add_parser("evaluate", help="evaluate a saved model on a dataset")

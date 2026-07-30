@@ -1,16 +1,11 @@
-"""Benchmark tinyintent on real intent datasets, averaged over seeds.
+"""Benchmark tinyintent top-1 accuracy on real intent datasets.
 
-Few-shot in-scope training with some intents held out entirely as unseen
-out-of-scope (the hard, near-OOS case), with a slice of those used as
-calibration negatives. Compares the decision policies:
-
-- lac  : single absolute-similarity threshold (decisive)
-- aps  : two-stage gate + Adaptive Prediction Sets (safe)
-- raps : APS with a set-size penalty (safe, more decisive)
+Few-shot in-scope training, averaged over seeds. Compares classifier heads
+(linear vs exemplar) and optionally fine-tuning the encoder.
 
 Run:
     uv run python scripts/benchmark.py --dataset banking --seeds 3
-    uv run python scripts/benchmark.py --dataset clinc --seeds 3 --risk 0.2
+    uv run python scripts/benchmark.py --dataset clinc --shots 10 --classifier linear
 """
 
 from __future__ import annotations
@@ -47,65 +42,43 @@ def load_pools(dataset: str):
     raise SystemExit(f"unknown dataset: {dataset} (choose clinc or banking)")
 
 
-def build(train_by, test_by, same_pool, shots, n_oos, seed):
+def build(train_by, test_by, same_pool, shots, seed):
     labels = sorted(train_by)
     rng = random.Random(seed)
-    rng.shuffle(labels)
-    oos, in_scope = set(labels[:n_oos]), labels[n_oos:]
 
-    fit, cal, test = [], [], []
-    for label in in_scope:
+    fit, test = [], []
+    for label in labels:
         pool = train_by[label][:]
         rng.shuffle(pool)
         fit += [Example(t, label) for t in pool[:shots]]
-        cal += [Example(t, label) for t in pool[shots:shots + 20]]
         test += [
             Example(t, label)
-            for t in (pool[shots + 20:shots + 40] if same_pool else test_by[label][:20])
+            for t in (pool[shots:shots + 20] if same_pool else test_by[label][:20])
         ]
-    for label in oos:
-        pool = train_by[label][:]
-        rng.shuffle(pool)
-        cal += [Example(t, "oos") for t in pool[:10]]
-        test += [
-            Example(t, "oos")
-            for t in (pool[10:30] if same_pool else test_by[label][:20])
-        ]
-    return fit, cal, test, len(in_scope), len(oos)
+    return fit, test, len(labels)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset", default="banking", choices=["clinc", "banking"])
-    parser.add_argument("--encoder-model", default="sentence-transformers/all-MiniLM-L6-v2")
+    parser.add_argument("--encoder-model", default="BAAI/bge-small-en-v1.5")
     parser.add_argument("--shots", type=int, default=20)
-    parser.add_argument("--n-oos", type=int, default=12)
-    parser.add_argument("--risk", type=float, default=0.2)
     parser.add_argument("--transform", default="none", choices=["none", "lda"])
-    parser.add_argument("--classifier", default="exemplar", choices=["exemplar", "linear"])
+    parser.add_argument("--classifier", default="linear", choices=["exemplar", "linear"])
     parser.add_argument("--finetune", action="store_true")
-    parser.add_argument("--reject-level", type=float, default=0.1)
     parser.add_argument("--seeds", type=int, default=3)
     args = parser.parse_args()
 
     train_by, test_by, same_pool = load_pools(args.dataset)
     frozen = None if args.finetune else SentenceEncoder(args.encoder_model)
-    policies = [("gate", "gate", 0.0), ("lac", "lac", 0.0), ("aps", "aps", 0.0)]
 
-    fields = ["coverage", "fire_rate", "fire_accuracy", "ambiguous_rate",
-              "abstain_rate", "oos_false_fire", "oos_abstain"]
     print(f"dataset={args.dataset} encoder={args.encoder_model.split('/')[-1]} "
-          f"finetune={args.finetune} shots={args.shots} risk={args.risk} "
-          f"seeds={args.seeds}")
-    print("  ".join(f"{h:>13}" for h in ["policy", *fields]))
+          f"finetune={args.finetune} shots={args.shots} "
+          f"classifier={args.classifier} seeds={args.seeds}")
 
-    # Fit each seed's model once (fine-tuning is the expensive part), reused
-    # across policies.
-    seed_models: list[tuple] = []
+    accs = []
     for seed in range(args.seeds):
-        fit, cal, test, n_in, n_oos = build(
-            train_by, test_by, same_pool, args.shots, args.n_oos, seed
-        )
+        fit, test, n_labels = build(train_by, test_by, same_pool, args.shots, seed)
         if args.finetune:
             encoder = finetune_encoder(
                 fit, out_dir=f"/tmp/tinyintent_ft_{args.dataset}_{seed}",
@@ -116,21 +89,9 @@ def main() -> None:
         model = IntentModel.fit(
             fit, encoder=encoder, transform=args.transform, classifier=args.classifier
         )
-        seed_models.append((model, cal, test))
+        accs.append(model.accuracy(test))
 
-    top1 = mean(model.accuracy(test) for model, _, test in seed_models)
-    print(f"top-1 accuracy (always decide, classifier={args.classifier}): {top1:.3f}\n")
-
-    for name, method, reg in policies:
-        runs = []
-        for model, cal, test in seed_models:
-            model.calibrate(cal, risk=args.risk, method=method, reg_lambda=reg,
-                            reject_level=args.reject_level)
-            runs.append(model.evaluate(test).as_dict())
-        avg = [mean(r[f] for r in runs) for f in fields]
-        print("  ".join([f"{name:>13}", *[f"{v:>13.3f}" for v in avg]]))
-
-    print(f"({n_in} in-scope + {n_oos} OOS intents)")
+    print(f"top-1 accuracy: {mean(accs):.3f}  ({n_labels} intents)")
 
 
 if __name__ == "__main__":

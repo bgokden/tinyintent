@@ -23,11 +23,8 @@ class ExemplarScorer:
     Each class is represented by its example vectors (not a single
     centroid), so multi-modal intents stay intact. A query's score for a
     class is the largest cosine similarity to any of that class's
-    exemplars. These are *absolute* similarities in [-1, 1], deliberately
-    not softmax-normalized: an input far from every class scores low
-    everywhere, which is the signal the conformal layer uses to abstain on
-    out-of-scope input. A relative softmax would hide that by always
-    naming a most-similar class.
+    exemplars. Simple and dependency-free, but the linear head is stronger
+    for pure top-1 accuracy (see :class:`LinearScorer`).
     """
 
     name = "exemplar"

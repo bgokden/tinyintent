@@ -12,92 +12,44 @@ utterance
   -> top-1 intent   (always decides)
 ```
 
-## Primary use: accurate top-1 classification
+## What it does
 
-The default is to **always decide** — return the single best intent for
-every input. Top-1 accuracy (20-shot, frozen `bge-small`, averaged over
-seeds):
+Return the single best intent for every input. Top-1 accuracy (20-shot,
+frozen `bge-small`, averaged over seeds):
 
 | dataset | exemplar head | **linear head (default)** | + fine-tune |
 |---|---:|---:|---:|
 | CLINC150 | 0.92 | **0.96** | 0.96 |
 | Banking77 | 0.89 | **0.90** | 0.90 |
 
-The linear (logistic-regression) head learns a boundary instead of trusting
-the single nearest example, which is why it wins for pure accuracy. No
-fine-tuning needed for CLINC-level results; fine-tuning helps most when
+The linear (logistic-regression) head learns a decision boundary instead of
+trusting the single nearest example, which is why it wins for pure accuracy.
+No fine-tuning needed for CLINC-level results; fine-tuning helps most when
 intents are close (see below).
 
 ```bash
-uv run tinyintent train --data intents.jsonl --out model      # linear, always decide
+uv run tinyintent train --data intents.jsonl --out model
 uv run tinyintent predict --model model "cancel my order"
-# Python: IntentModel.fit(examples, classifier="linear").classify("cancel my order")
+# Python: IntentModel.fit(examples).classify("cancel my order")
 ```
 
-## Optional: abstain or reject instead of always deciding
+## How it compares
 
-If you would rather decline on uncertain or out-of-scope input than force a
-guess, add a decision policy (`--method`): `gate` (fire top-1 or reject),
-`aps` (safety-first prediction sets), or `lac` (a single threshold). These
-trade some coverage for restraint and are documented below; the default is
-to skip them and always decide.
+Few-shot top-1 accuracy against published methods on the same datasets. The
+point is that a frozen modern encoder plus a linear head is competitive with
+methods that fine-tune, at a fraction of the cost:
 
-## Benchmark
-
-Real datasets (CLINC150, Banking77), few-shot, with some intents **held out
-entirely as out-of-scope** (unseen — the hard, near-OOS case) and a slice of
-those used as calibration negatives. Frozen `all-MiniLM-L6-v2`, averaged over
-seeds. Reproduce with
-`uv run python scripts/benchmark.py --dataset {clinc,banking} --seeds 3`.
-
-Banking77, 20-shot, 65 in-scope + 12 OOS intents, risk 0.2:
-
-| policy | coverage | fire rate | fire acc | ambiguous | OOS false-fire |
-|---|---:|---:|---:|---:|---:|
-| **APS** (default) | 0.74 | 0.19 | **1.00** | 0.55 | **0.02** |
-| **LAC + floor** | 0.71 | **0.60** | 0.96 | 0.14 | 0.20 |
-
-Two policies, two operating profiles — a trade, not a winner:
-
-- **APS is safety-first.** It almost never fires the wrong intent (OOS
-  false-fire ~0, fire accuracy ~100%) by turning uncertain or out-of-scope
-  inputs into *ambiguous* instead of a confident guess. The price is
-  decisiveness — it fires less and escalates more.
-- **LAC + floor is decisive.** It resolves most inputs itself (~60% fire),
-  at the cost of more near-OOS false fires (~20%). It also improves with
-  more shots, where APS stays conservative.
-
-Pick by the cost of a wrong workflow versus the cost of escalating. The same
-pattern holds on CLINC150.
-
-The decisiveness ceiling is the frozen-encoder ranking, not the set method:
-regularized APS (RAPS, `reg_lambda`) and an LDA transform were both tried and
-did not help. The one thing that does is **fine-tuning the encoder** (see
-below), which lifts the decisive LAC policy substantially:
-
-| setup | fire rate | fire acc | ambiguous | coverage |
+| method | CLINC 5-shot | CLINC 10-shot | Banking 5-shot | Banking 10-shot |
 |---|---:|---:|---:|---:|
-| frozen bge + LAC (CLINC) | 0.60 | 0.98 | 0.15 | 0.74 |
-| **fine-tuned bge + LAC (CLINC)** | **0.79** | **0.99** | **0.02** | **0.81** |
+| **tinyintent** (frozen bge + linear) | 0.91 | 0.95 | 0.83 | 0.87 |
+| DNNC | 0.91 | 0.94 | 0.80 | 0.87 |
+| CPFT | 0.92 | 0.94 | 0.81 | 0.87 |
+| SetFit (8-shot) | 0.86 | — | 0.78 | — |
 
-## Fine-tuning (optional)
-
-Frozen embeddings cap how often the true intent ranks first among many close
-intents. A short contrastive fine-tune (SetFit body recipe: same-intent pairs
-with in-batch negatives) specializes the encoder and fixes that ranking. It
-is the one lever that meaningfully raises decisiveness — validated on CLINC150
-and Banking77 — and it stays a plain SentenceTransformer afterwards, used
-frozen by the rest of the pipeline.
-
-```bash
-uv sync --extra train
-uv run tinyintent train --data intents.jsonl --out model --finetune --method lac
-# or in Python: from tinyintent import finetune_encoder
-```
-
-It needs a training step (a minute or two on a GPU) and breaks the pure
-zero-training story, so it is opt-in. APS stays conservative either way; pair
-fine-tuning with the decisive LAC policy.
+Full-data ceilings are around 0.97 (CLINC) and 0.94-0.95 (Banking, RoBERTa /
+SPACE-2.0). Most of tinyintent's few-shot strength comes from the encoder, not
+a clever method — which is exactly the point: keep the method small and let a
+good frozen encoder do the work.
 
 ## Install
 
@@ -110,20 +62,16 @@ uv sync
 ## Quickstart (CLI)
 
 ```bash
-uv run tinyintent train --data examples/commerce_intents.jsonl --out model --risk 0.1
+uv run tinyintent train --data examples/commerce_intents.jsonl --out model
 uv run tinyintent predict --model model "put my motorcycle up for sale"
 uv run tinyintent evaluate --model model --data examples/commerce_intents.jsonl
 ```
 
 ```
 > put my motorcycle up for sale
-  decision: fire  ->  sell
-  prediction set: sell 0.53
+  intent: sell  (0.71)
+  runners-up: buy 0.12, rent 0.08
   nearest example: "list my bike for sale" (0.53)
-
-> what's the weather tomorrow
-  decision: abstain
-  prediction set: (empty)
 ```
 
 ## Quickstart (Python)
@@ -132,26 +80,39 @@ uv run tinyintent evaluate --model model --data examples/commerce_intents.jsonl
 from tinyintent import IntentModel, load_jsonl
 
 data = load_jsonl("examples/commerce_intents.jsonl")
-
-# fit + calibrate with an internal held-out split (conformal needs one)
-model = IntentModel.fit_calibrate(data, risk=0.1)
+model = IntentModel.fit(data)
 model.save("model")
 
+print(model.classify("I want my money back for order 883"))   # refund
+
 pred = model.predict("I want my money back for order 883")
-print(pred.decision, pred.intent)     # fire refund
-print(pred.set_)                      # [('refund', 0.81), ...]
-print(pred.explanation)               # nearest labelled example
+print(pred.intent, pred.score)   # refund 0.83
+print(pred.ranking[:3])          # [('refund', 0.83), ('cancel_order', 0.06), ...]
+print(pred.explanation)          # nearest labelled example
 ```
 
-Calibration must use held-out data — exemplars self-match at similarity
-1.0, which collapses the threshold. `fit_calibrate` splits for you; if you
-call `fit` and `calibrate` separately, pass disjoint sets.
+## Fine-tuning (optional)
+
+Frozen embeddings cap how often the true intent ranks first among many close
+intents. A short contrastive fine-tune (SetFit body recipe: same-intent pairs
+with in-batch negatives) specializes the encoder and helps most on datasets
+with near-synonym intents. It stays a plain SentenceTransformer afterwards,
+used frozen by the rest of the pipeline.
+
+```bash
+uv sync --extra train
+uv run tinyintent train --data intents.jsonl --out model --finetune
+# or in Python: from tinyintent import finetune_encoder
+```
+
+It needs a training step (a minute or two on a GPU) and breaks the pure
+zero-training story, so it is opt-in.
 
 ## Data format
 
-JSON Lines of `{"text", "label"}`. Use the reserved label `oos` for
-out-of-scope examples — they are never a class, only used to measure false
-firing. Few-shot is fine (10–20 per intent).
+JSON Lines of `{"text", "label"}`. Few-shot is fine (10-20 per intent). The
+reserved label `oos` marks out-of-scope examples; they are ignored at fit
+time (never a class) and skipped when measuring accuracy.
 
 ```json
 {"text": "cancel my order", "label": "cancel_order"}
@@ -160,47 +121,22 @@ firing. Few-shot is fine (10–20 per intent).
 
 ## How it works
 
-- **Encoder** (`encoder.py`) — frozen `all-MiniLM-L6-v2` by default;
+- **Encoder** (`encoder.py`) — frozen `BAAI/bge-small-en-v1.5` by default;
   pluggable via the `Encoder` protocol. A dependency-free `HashingEncoder`
   is included for offline tests. ONNX or static (Model2Vec) encoders can be
   dropped in for a smaller footprint.
-- **Scorer** (`scorer.py`) — each intent is its set of example vectors; a
-  query's score for an intent is the max cosine similarity to them
-  (absolute, so out-of-scope stays low; multi-modal intents stay intact).
-- **Decision policy** — two options, both giving `1 - a` coverage:
-  - **APS** (`aps.py`, default) — two stage: an absolute-similarity *gate*
-    rejects out-of-scope before any softmax, then Adaptive Prediction Sets
-    build the set over temperature-scaled probabilities. Safety-first.
-  - **LAC** (`conformal.py`) — a single absolute-similarity threshold
-    `1 - q`. Simpler and more decisive.
-- **Model** (`model.py`) — ties them together, turns set size into a
-  decision, and attaches the nearest exemplar as an explanation.
-
-## Tuning
-
-- **`risk`** is the dial. Lower → larger sets, more coverage, more abstain /
-  ambiguous. Higher → more single-intent fires, less coverage.
-- **More shots or more separable intents** shrink sets and reduce
-  ambiguity. If two intents are near-duplicates, expect ambiguity — that is
-  the model correctly refusing to guess.
-- **Provide negatives.** Put `oos` examples in the calibration data and they
-  raise an absolute abstain floor (`calibrate(..., use_oos=True)`, on by
-  default). On the benchmark this lifted OOS abstention from 0.42 to 0.73
-  and cut ambiguity, trading some in-scope coverage — a knob worth having
-  when false firing is costly.
-- **`method`** picks the profile: `aps` (default, safety-first — rarely
-  misfires, escalates more) or `lac` (decisive — fires more, misfires more
-  on near-OOS). See the benchmark.
-- **`mondrian=True`** (LAC only) calibrates a threshold per intent. It helps
-  only with plenty of calibration data per class; at few-shot it inflates
-  sets, so it is off by default.
+- **Scorer** (`scorer.py`) — the classifier head. `LinearScorer` (default)
+  is a logistic regression over the embeddings; `ExemplarScorer` scores each
+  intent by max cosine similarity to its example vectors. Both store plain
+  arrays, so the artifact stays portable.
+- **Model** (`model.py`) — ties them together, returns the top-1 intent with
+  a ranking, and attaches the nearest labelled example as an explanation.
 
 ## Encoders
 
 Default: `BAAI/bge-small-en-v1.5` — it beat `all-MiniLM-L6-v2` on the intent
-benchmarks (higher coverage and fire accuracy, lower near-OOS false-fire)
-while staying small and frozen. Alternatives via the pluggable `Encoder`
-protocol:
+benchmarks while staying small and frozen. Alternatives via the pluggable
+`Encoder` protocol:
 
 - `SentenceEncoder("sentence-transformers/all-MiniLM-L6-v2")` — lighter.
 - `StaticEncoder` — Model2Vec static embeddings, **numpy-only, no torch**,
@@ -208,24 +144,21 @@ protocol:
   but weaker on phrasing/negation.
 - `HashingEncoder` — dependency-free stub used in tests.
 
-An optional LDA metric-learning transform (`fit(..., transform="lda")`)
-sharpens class separation but lowered coverage in testing, so it is off by
-default.
-
 ## Layout
 
 ```
 src/tinyintent/
     data.py       Example, jsonl / few-shot loaders, stratified split
-    encoder.py    Encoder protocol, SentenceEncoder (MiniLM), HashingEncoder
-    scorer.py     ExemplarScorer (per-class max cosine similarity)
-    conformal.py  split-conformal prediction sets (LAC)
-    model.py      IntentModel: fit / calibrate / predict / evaluate / save / load
-    metrics.py    coverage, fire rate/accuracy, ambiguous, abstain, OOS rates
+    encoder.py    Encoder protocol, SentenceEncoder, StaticEncoder, HashingEncoder
+    scorer.py     LinearScorer (default), ExemplarScorer
+    transform.py  optional embedding transforms
+    model.py      IntentModel: fit / classify / predict / evaluate / save / load
+    metrics.py    top-1 accuracy report
     explain.py    nearest labelled example
+    finetune.py   optional contrastive encoder fine-tune
     cli.py        train / predict / evaluate
-examples/         commerce intents (+ oos)
-scripts/          benchmark.py (CLINC150)
+examples/         commerce intents
+scripts/          benchmark.py (CLINC150, Banking77)
 tests/            offline tests (hashing encoder)
 ```
 

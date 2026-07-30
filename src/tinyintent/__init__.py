@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from tinyintent.aps import Aps
-from tinyintent.conformal import Conformal
 from tinyintent.data import (
     OOS_LABEL,
     Example,
@@ -18,7 +16,6 @@ from tinyintent.encoder import (
     make_encoder,
 )
 from tinyintent.finetune import finetune_encoder
-from tinyintent.gate import DecisiveGate
 from tinyintent.metrics import Report, score_predictions
 from tinyintent.model import IntentModel, Prediction
 from tinyintent.scorer import ExemplarScorer, LinearScorer
@@ -26,9 +23,6 @@ from tinyintent.scorer import ExemplarScorer, LinearScorer
 
 __all__ = [
     "DEFAULT_MODEL",
-    "Aps",
-    "Conformal",
-    "DecisiveGate",
     "Encoder",
     "Example",
     "ExemplarScorer",
