@@ -76,28 +76,31 @@ Reproduce with `uv run python scripts/benchmark.py --dataset banking`.
 Fine-tuning contrastively specializes the encoder
 (`MultipleNegativesRankingLoss` over same-intent pairs, the SetFit body
 recipe). It is **optional and situational**: it adds about a point on a
-smaller base at low shot counts, and nothing on `bge-large`, which is already
-saturated frozen.
+smaller base at low shot counts, and only a marginal gain on `bge-large`,
+which has little headroom left frozen.
 
 | setup | Banking77, 20-shot |
 |---|---:|
 | bge-small, frozen | 0.895 |
-| bge-small, fine-tuned | 0.905 |
+| bge-small, fine-tuned (lr 2e-5) | 0.905 |
 | bge-large, frozen | 0.909 |
-| bge-large, fine-tuned | 0.907 |
+| bge-large, fine-tuned (lr 1e-6) | 0.913 |
 
-So reach for fine-tuning only when you need a small, portable base *and* the
-extra point:
+The learning rate must scale down with the base: 2e-5 suits `bge-small`, but a
+335M encoder like `bge-large` needs roughly `1e-6` — the default 2e-5 slightly
+*degrades* it. So reach for fine-tuning mainly when you need a small, portable
+base *and* the extra point:
 
 ```bash
 uv sync --extra train
 uv run tinyintent train --data intents.jsonl --out model --finetune --epochs 1
+# larger base: pass a lower LR via finetune_encoder(..., learning_rate=1e-6)
 ```
 
 `--epochs` controls the passes (one is usually best; more overfits the pair
 set). Fine-tuning needs a training step (a minute or two on a GPU). Note that
-ModernBERT-based encoders are strong frozen but degrade under this recipe, so
-they are not recommended as a fine-tuning base.
+ModernBERT-based encoders collapse under this recipe at 2e-5 (they need a far
+lower LR just to match their frozen accuracy), so they are best used frozen.
 
 ## Data format
 
