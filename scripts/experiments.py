@@ -27,6 +27,7 @@ from datasets import load_dataset
 ENCODERS = {
     "bge-small": "BAAI/bge-small-en-v1.5",
     "bge-base": "BAAI/bge-base-en-v1.5",
+    "bge-large": "BAAI/bge-large-en-v1.5",
     "minilm": "sentence-transformers/all-MiniLM-L6-v2",
     "gte-small": "thenlper/gte-small",
     "e5-small": "intfloat/e5-small-v2",

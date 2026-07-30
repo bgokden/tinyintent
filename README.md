@@ -1,48 +1,47 @@
 # tinyintent
 
-A small, portable intent classifier. tinyintent contrastively fine-tunes a
-sentence encoder on a few labelled utterances per intent and fits a linear
-head on top, producing a model that maps text to the single best intent on
-CPU, with no LLM in the loop.
+A small, portable intent classifier. tinyintent embeds a few labelled
+utterances per intent with a frozen sentence encoder and fits a linear head on
+top, producing a model that maps text to the single best intent on CPU, with
+no LLM in the loop and no training step.
 
 ```
 utterance
-  -> fine-tuned sentence encoder (bge-small)
+  -> frozen sentence encoder (bge-large)
   -> linear classifier head
   -> top-1 intent
 ```
 
 ## Install
 
-Requires [uv](https://docs.astral.sh/uv/). Fine-tuning uses the `train` extra:
+Requires [uv](https://docs.astral.sh/uv/).
 
 ```bash
-uv sync --extra train
+uv sync
 ```
 
 ## Quickstart (CLI)
 
 ```bash
-uv run tinyintent train --data intents.jsonl --out model --finetune
+uv run tinyintent train --data intents.jsonl --out model
 uv run tinyintent predict --model model "cancel my order"
 uv run tinyintent evaluate --model model --data intents.jsonl
 ```
 
 ```
 > put my motorcycle up for sale
-  intent: sell  (0.76)
-  runners-up: rent 0.08, buy 0.07
-  nearest example: "list my bike for sale" (0.89)
+  intent: sell  (0.87)
+  runners-up: buy 0.04, rent 0.04
+  nearest example: "list my bike for sale" (0.84)
 ```
 
 ## Quickstart (Python)
 
 ```python
-from tinyintent import IntentModel, finetune_encoder, load_jsonl
+from tinyintent import IntentModel, load_jsonl
 
 data = load_jsonl("intents.jsonl")
-encoder = finetune_encoder(data, out_dir="model/encoder", epochs=1)
-model = IntentModel.fit(data, encoder=encoder)
+model = IntentModel.fit(data)          # frozen encoder + linear head, no training
 model.save("model")
 
 print(model.classify("I want my money back for order 883"))   # refund
@@ -53,30 +52,52 @@ print(pred.ranking[:3])             # ranked intents
 print(pred.explanation)             # nearest labelled example
 ```
 
-## Fine-tuning
+## Accuracy
 
-The encoder is trained with a contrastive objective
-(`MultipleNegativesRankingLoss` over same-intent pairs with in-batch
-negatives, the SetFit body recipe). This specializes the embedding space so
-same-intent utterances cluster and distinct intents separate, raising how
-often the correct intent ranks first. The result is a plain
-`SentenceTransformer`, used frozen by the classifier at inference.
+Top-1 accuracy, frozen encoder + linear head, few-shot, averaged over seeds:
 
-`--epochs` controls the number of training passes:
+| dataset | bge-small (portable) | bge-large (default) |
+|---|---:|---:|
+| CLINC150, 20-shot | 0.96 | 0.97 |
+| Banking77, 20-shot | 0.90 | 0.91 |
 
-```bash
-uv run tinyintent train --data intents.jsonl --out model --finetune --epochs 3
-```
-
-One epoch is the default and is often best on large, well-separated datasets,
-where extra epochs overfit the pair set. Small or closely-worded intent sets
-can benefit from 2-3 epochs. A larger base encoder trades size for accuracy:
+`bge-large` is the default for best accuracy; `bge-small` is ~10x lighter for
+a point less. Swap the base with `IntentModel.fit(data, encoder=...)`:
 
 ```python
-finetune_encoder(data, out_dir="model/encoder", base_model="BAAI/bge-base-en-v1.5")
+from tinyintent import IntentModel, SentenceEncoder
+model = IntentModel.fit(data, encoder=SentenceEncoder("BAAI/bge-small-en-v1.5"))
 ```
 
-Fine-tuning needs a training step (a minute or two on a GPU).
+Reproduce with `uv run python scripts/benchmark.py --dataset banking`.
+
+## Fine-tuning (optional)
+
+Fine-tuning contrastively specializes the encoder
+(`MultipleNegativesRankingLoss` over same-intent pairs, the SetFit body
+recipe). It is **optional and situational**: it adds about a point on a
+smaller base at low shot counts, and nothing on `bge-large`, which is already
+saturated frozen.
+
+| setup | Banking77, 20-shot |
+|---|---:|
+| bge-small, frozen | 0.895 |
+| bge-small, fine-tuned | 0.905 |
+| bge-large, frozen | 0.909 |
+| bge-large, fine-tuned | 0.907 |
+
+So reach for fine-tuning only when you need a small, portable base *and* the
+extra point:
+
+```bash
+uv sync --extra train
+uv run tinyintent train --data intents.jsonl --out model --finetune --epochs 1
+```
+
+`--epochs` controls the passes (one is usually best; more overfits the pair
+set). Fine-tuning needs a training step (a minute or two on a GPU). Note that
+ModernBERT-based encoders are strong frozen but degrade under this recipe, so
+they are not recommended as a fine-tuning base.
 
 ## Data format
 
@@ -89,31 +110,20 @@ are ignored during training and evaluation.
 {"text": "what's the weather", "label": "oos"}
 ```
 
-## Accuracy
-
-Top-1 accuracy after fine-tuning (`bge-small` base, linear head, few-shot,
-averaged over seeds):
-
-| dataset | 10-shot | 20-shot |
-|---|---:|---:|
-| CLINC150 | 0.95 | 0.96 |
-| Banking77 | 0.88 | 0.91 |
-
-Reproduce with `uv run python scripts/benchmark.py --dataset banking --finetune`.
-
 ## API
 
-- `finetune_encoder(examples, out_dir, base_model=..., epochs=1, ...)` — fine-tune and return an encoder
-- `IntentModel.fit(examples, encoder=None, classifier="linear")` — fit the head
+- `IntentModel.fit(examples, encoder=None, classifier="linear")` — fit the head on frozen embeddings
 - `model.classify(text)` / `classify_batch(texts)` — the top-1 intent label(s)
 - `model.predict(text)` — `Prediction(intent, score, ranking, explanation)`
 - `model.evaluate(examples)` — top-1 accuracy report
 - `model.save(dir)` / `IntentModel.load(dir)` — persist and reload
+- `finetune_encoder(examples, out_dir, base_model=..., epochs=1, ...)` — optional encoder fine-tune
 
 ## How it works
 
-- **Encoder** (`encoder.py`) — a fine-tuned `SentenceTransformer` (`bge-small`
-  base). Pluggable via the `Encoder` protocol.
+- **Encoder** (`encoder.py`) — a frozen `SentenceTransformer` (`bge-large`
+  base). Pluggable via the `Encoder` protocol; `bge-small`, static
+  (Model2Vec), and a dependency-free hashing encoder are included.
 - **Scorer** (`scorer.py`) — a logistic-regression head over the embeddings,
   stored as plain arrays so the model artifact stays portable.
 - **Model** (`model.py`) — fits the head, returns the top-1 intent with a
@@ -126,7 +136,7 @@ src/tinyintent/
     data.py       Example, jsonl / few-shot loaders, stratified split
     encoder.py    Encoder protocol, SentenceEncoder, StaticEncoder, HashingEncoder
     scorer.py     LinearScorer (default), ExemplarScorer
-    finetune.py   contrastive encoder fine-tune
+    finetune.py   optional contrastive encoder fine-tune
     model.py      IntentModel: fit / classify / predict / evaluate / save / load
     metrics.py    top-1 accuracy report
     explain.py    nearest labelled example

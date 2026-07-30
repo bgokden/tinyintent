@@ -61,7 +61,7 @@ def build(train_by, test_by, same_pool, shots, seed):
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset", default="banking", choices=["clinc", "banking"])
-    parser.add_argument("--encoder-model", default="BAAI/bge-small-en-v1.5")
+    parser.add_argument("--encoder-model", default="BAAI/bge-large-en-v1.5")
     parser.add_argument("--shots", type=int, default=20)
     parser.add_argument("--classifier", default="linear", choices=["exemplar", "linear"])
     parser.add_argument("--finetune", action="store_true")

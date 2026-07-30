@@ -15,3 +15,4 @@ model/
 
 # Local design notes (kept out of the repo on purpose)
 notes/
+tmp/

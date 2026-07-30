@@ -6,10 +6,12 @@ from typing import Protocol
 import numpy as np
 
 
-# bge-small is the accuracy/size sweet spot on the intent benchmarks: it beats
-# MiniLM/gte-small/e5-small on top-1 and trails bge-base by <1pt at a third of
-# the size. bge-base is the drop-in accuracy upgrade.
-DEFAULT_MODEL = "BAAI/bge-small-en-v1.5"
+# bge-large is the default base: best top-1 accuracy in the encoder sweep and it
+# fine-tunes reliably with the contrastive recipe (unlike ModernBERT-based
+# encoders, which are strong frozen but degrade under fine-tuning). bge-small is
+# the lighter, portable alternative; gte-modernbert-base is a strong frozen-only
+# option.
+DEFAULT_MODEL = "BAAI/bge-large-en-v1.5"
 
 
 def _l2_normalize(matrix: np.ndarray) -> np.ndarray:
