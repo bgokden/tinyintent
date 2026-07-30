@@ -17,14 +17,15 @@ utterance
 Return the single best intent for every input. Top-1 accuracy (20-shot,
 frozen `bge-small`, averaged over seeds):
 
-| dataset | exemplar head | **linear head (default)** | + fine-tune |
-|---|---:|---:|---:|
-| CLINC150 | 0.92 | **0.96** | 0.96 |
-| Banking77 | 0.89 | **0.90** | 0.90 |
+| dataset | exemplar head | centroid | knn | **linear head (default)** | + fine-tune |
+|---|---:|---:|---:|---:|---:|
+| CLINC150 | 0.92 | 0.95 | 0.92 | **0.96** | 0.96 |
+| Banking77 | 0.89 | 0.86 | 0.87 | **0.90** | 0.91 |
 
 The linear (logistic-regression) head learns a decision boundary instead of
-trusting the single nearest example, which is why it wins for pure accuracy.
-No fine-tuning needed for CLINC-level results; fine-tuning helps most when
+trusting the single nearest example, which is why it wins for pure accuracy
+(swept against exemplar, centroid, and knn heads on both datasets). No
+fine-tuning needed for CLINC-level results; fine-tuning adds ~1 point where
 intents are close (see below).
 
 ```bash
@@ -91,13 +92,34 @@ print(pred.ranking[:3])          # [('refund', 0.83), ('cancel_order', 0.06), ..
 print(pred.explanation)          # nearest labelled example
 ```
 
+## How many examples do I need?
+
+Top-1 accuracy vs shots per intent (frozen `bge-small`, linear head):
+
+| shots | 1 | 5 | 10 | 20 | 50 | 100 |
+|---|---:|---:|---:|---:|---:|---:|
+| CLINC150 | 0.72 | 0.92 | 0.95 | 0.96 | 0.97 | — |
+| Banking77 | 0.60 | 0.83 | 0.87 | 0.90 | 0.92 | 0.93 |
+
+It climbs steeply to ~10 shots and plateaus after 20. CLINC is near-saturated
+by 20 shots; Banking keeps inching up because its intents overlap more (its
+~0.93 at 100 shots is close to the supervised ceiling for this dataset).
+
 ## Fine-tuning (optional)
 
 Frozen embeddings cap how often the true intent ranks first among many close
 intents. A short contrastive fine-tune (SetFit body recipe: same-intent pairs
-with in-batch negatives) specializes the encoder and helps most on datasets
-with near-synonym intents. It stays a plain SentenceTransformer afterwards,
-used frozen by the rest of the pipeline.
+with in-batch negatives) specializes the encoder. It adds about a point of
+top-1 accuracy where intents are close, most visible at low shot counts:
+
+| setup | CLINC 10-shot | Banking 10-shot | Banking 20-shot |
+|---|---:|---:|---:|
+| frozen | 0.947 | 0.868 | 0.895 |
+| **+ fine-tune (1 epoch)** | **0.953** | **0.877** | **0.905** |
+
+One epoch is enough — more overfits the small pair set and gives it back. It
+stays a plain SentenceTransformer afterwards, used frozen by the rest of the
+pipeline.
 
 ```bash
 uv sync --extra train
@@ -134,14 +156,25 @@ time (never a class) and skipped when measuring accuracy.
 
 ## Encoders
 
-Default: `BAAI/bge-small-en-v1.5` — it beat `all-MiniLM-L6-v2` on the intent
-benchmarks while staying small and frozen. Alternatives via the pluggable
-`Encoder` protocol:
+Default: `BAAI/bge-small-en-v1.5` — the accuracy/size sweet spot. In a frozen
+sweep (20-shot, linear head) it beat MiniLM, gte-small and e5-small, and
+trailed `bge-base` by under a point at a third of the size:
 
+| encoder | CLINC | Banking | note |
+|---|---:|---:|---|
+| **bge-small (default)** | 0.96 | 0.90 | sweet spot |
+| bge-base | 0.97 | 0.91 | accuracy upgrade, ~3x size |
+| gte-small | 0.96 | 0.89 | |
+| MiniLM-L6 | 0.95 | 0.89 | lighter |
+| Model2Vec static | 0.91 | 0.84 | numpy-only, no torch |
+
+Swap via the pluggable `Encoder` protocol:
+
+- `SentenceEncoder("BAAI/bge-base-en-v1.5")` — the accuracy upgrade.
 - `SentenceEncoder("sentence-transformers/all-MiniLM-L6-v2")` — lighter.
-- `StaticEncoder` — Model2Vec static embeddings, **numpy-only, no torch**,
-  for the smallest footprint (`uv sync --extra static`). Faster and tiny,
-  but weaker on phrasing/negation.
+- `StaticEncoder` — Model2Vec static embeddings, **numpy-only, no torch**, for
+  the smallest footprint (`uv sync --extra static`). Faster and tiny, ~5 points
+  behind on accuracy, weaker on phrasing/negation.
 - `HashingEncoder` — dependency-free stub used in tests.
 
 ## Layout
@@ -157,7 +190,7 @@ src/tinyintent/
     finetune.py   optional contrastive encoder fine-tune
     cli.py        train / predict / evaluate
 examples/         commerce intents
-scripts/          benchmark.py (CLINC150, Banking77)
+scripts/          benchmark.py, experiments.py (CLINC150, Banking77 sweeps)
 tests/            offline tests (hashing encoder)
 ```
 

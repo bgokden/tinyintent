@@ -6,8 +6,9 @@ from typing import Protocol
 import numpy as np
 
 
-# bge-small beats MiniLM on the intent benchmarks (higher coverage and fire
-# accuracy, lower near-OOS false-fire) while staying small and frozen.
+# bge-small is the accuracy/size sweet spot on the intent benchmarks: it beats
+# MiniLM/gte-small/e5-small on top-1 and trails bge-base by <1pt at a third of
+# the size. bge-base is the drop-in accuracy upgrade.
 DEFAULT_MODEL = "BAAI/bge-small-en-v1.5"
 
 

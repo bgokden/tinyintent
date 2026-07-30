@@ -10,7 +10,7 @@ def finetune_encoder(
     examples: list[Example],
     out_dir: str,
     base_model: str = DEFAULT_MODEL,
-    epochs: int = 2,
+    epochs: int = 1,
     pairs_per_example: int = 4,
     batch_size: int = 32,
     learning_rate: float = 2e-5,
