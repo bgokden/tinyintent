@@ -34,29 +34,37 @@ wrong behaviour. tinyintent is built around *declining*:
 
 ## Benchmark
 
-CLINC150, 20-shot, 130 in-scope intents with 20 intents **held out entirely
-as out-of-scope** (unseen — the hard, near-OOS case), with a slice of those
-used as calibration negatives. Frozen `all-MiniLM-L6-v2`. Reproduce with
-`uv run python scripts/benchmark.py --method {aps,lac}`.
+Real datasets (CLINC150, Banking77), few-shot, with some intents **held out
+entirely as out-of-scope** (unseen — the hard, near-OOS case) and a slice of
+those used as calibration negatives. Frozen `all-MiniLM-L6-v2`, averaged over
+seeds. Reproduce with
+`uv run python scripts/benchmark.py --dataset {clinc,banking} --seeds 3`.
 
-Two decision policies, two operating profiles:
+Banking77, 20-shot, 65 in-scope + 12 OOS intents, risk 0.2:
 
 | policy | coverage | fire rate | fire acc | ambiguous | OOS false-fire |
 |---|---:|---:|---:|---:|---:|
-| **APS** (default, risk 0.2) | 0.77 | 0.21 | **1.00** | 0.56 | **0.01** |
-| **LAC + floor** | 0.75 | **0.57** | 0.97 | **0.20** | 0.24 |
+| **APS** (default) | 0.74 | 0.19 | **1.00** | 0.55 | **0.02** |
+| **LAC + floor** | 0.71 | **0.60** | 0.96 | 0.14 | 0.20 |
 
-Read it as a trade, not a winner:
+Two policies, two operating profiles — a trade, not a winner:
 
 - **APS is safety-first.** It almost never fires the wrong intent (OOS
-  false-fire ~0, fire accuracy ~100%) because it turns uncertain or
-  out-of-scope inputs into *ambiguous* rather than a confident guess. The
-  price is decisiveness — it fires less and escalates more.
-- **LAC + floor is decisive.** It resolves most inputs itself (57% fire),
-  at the cost of more near-OOS false fires (24%).
+  false-fire ~0, fire accuracy ~100%) by turning uncertain or out-of-scope
+  inputs into *ambiguous* instead of a confident guess. The price is
+  decisiveness — it fires less and escalates more.
+- **LAC + floor is decisive.** It resolves most inputs itself (~60% fire),
+  at the cost of more near-OOS false fires (~20%). It also improves with
+  more shots, where APS stays conservative.
 
-Pick by the cost of a wrong workflow versus the cost of escalating. Default
-is APS. Coverage tracks the conformal target in both.
+Pick by the cost of a wrong workflow versus the cost of escalating. The same
+pattern holds on CLINC150.
+
+The decisiveness ceiling is the frozen-encoder ranking, not the set method:
+regularized APS (RAPS, `reg_lambda`) was tried and did not help across a
+lambda/k_reg sweep and both datasets, so it defaults off. Lifting decisiveness
+needs a better ranking (more shots, a stronger encoder), not a different
+conformal rule.
 
 ## Install
 

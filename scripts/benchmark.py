@@ -1,76 +1,111 @@
-"""Benchmark tinyintent on CLINC150.
+"""Benchmark tinyintent on real intent datasets, averaged over seeds.
 
-Few-shot in-scope training with 20 intents held out entirely as unseen
-out-of-scope, so the report measures both in-scope quality and genuine
-novelty rejection. Downloads the dataset from the Hugging Face Hub.
+Few-shot in-scope training with some intents held out entirely as unseen
+out-of-scope (the hard, near-OOS case), with a slice of those used as
+calibration negatives. Compares the decision policies:
+
+- lac  : single absolute-similarity threshold (decisive)
+- aps  : two-stage gate + Adaptive Prediction Sets (safe)
+- raps : APS with a set-size penalty (safe, more decisive)
 
 Run:
-    uv run python scripts/benchmark.py --shots 20
+    uv run python scripts/benchmark.py --dataset banking --seeds 3
+    uv run python scripts/benchmark.py --dataset clinc --seeds 3 --risk 0.2
 """
 
 from __future__ import annotations
 
 import argparse
 import random
+from statistics import mean
 
 from datasets import load_dataset
 
 from tinyintent import Example, IntentModel, SentenceEncoder
 
 
-def build_splits(shots: int, n_oos: int, seed: int):
-    ds = load_dataset("FastFit/clinc_150", split="train")
-    by_label: dict[str, list[str]] = {}
-    for row in ds:
-        by_label.setdefault(row["label"], []).append(row["text"])
+def load_pools(dataset: str):
+    """Return (train_by_label, test_by_label, same_pool)."""
 
-    labels = sorted(by_label)
+    if dataset == "clinc":
+        ds = load_dataset("FastFit/clinc_150", split="train")
+        by: dict[str, list[str]] = {}
+        for row in ds:
+            by.setdefault(row["label"], []).append(row["text"])
+        return by, by, True
+
+    if dataset == "banking":
+        train_by: dict[str, list[str]] = {}
+        test_by: dict[str, list[str]] = {}
+        for row in load_dataset("mteb/banking77", split="train"):
+            train_by.setdefault(row["label_text"], []).append(row["text"])
+        for row in load_dataset("mteb/banking77", split="test"):
+            test_by.setdefault(row["label_text"], []).append(row["text"])
+        return train_by, test_by, False
+
+    raise SystemExit(f"unknown dataset: {dataset} (choose clinc or banking)")
+
+
+def build(train_by, test_by, same_pool, shots, n_oos, seed):
+    labels = sorted(train_by)
     rng = random.Random(seed)
     rng.shuffle(labels)
-    oos_labels = set(labels[:n_oos])
-    in_scope = labels[n_oos:]
+    oos, in_scope = set(labels[:n_oos]), labels[n_oos:]
 
     fit, cal, test = [], [], []
     for label in in_scope:
-        texts = by_label[label][:]
-        rng.shuffle(texts)
-        fit += [Example(t, label) for t in texts[:shots]]
-        cal += [Example(t, label) for t in texts[shots:shots + 20]]
-        test += [Example(t, label) for t in texts[shots + 20:shots + 40]]
-    for label in oos_labels:
-        # Split each held-out intent: some examples as OOS negatives for
-        # calibration (the abstain floor), the rest as OOS at test time.
-        cal += [Example(t, "oos") for t in by_label[label][:10]]
-        test += [Example(t, "oos") for t in by_label[label][10:30]]
-
-    return fit, cal, test, len(in_scope), len(oos_labels)
+        pool = train_by[label][:]
+        rng.shuffle(pool)
+        fit += [Example(t, label) for t in pool[:shots]]
+        cal += [Example(t, label) for t in pool[shots:shots + 20]]
+        test += [
+            Example(t, label)
+            for t in (pool[shots + 20:shots + 40] if same_pool else test_by[label][:20])
+        ]
+    for label in oos:
+        pool = train_by[label][:]
+        rng.shuffle(pool)
+        cal += [Example(t, "oos") for t in pool[:10]]
+        test += [
+            Example(t, "oos")
+            for t in (pool[10:30] if same_pool else test_by[label][:20])
+        ]
+    return fit, cal, test, len(in_scope), len(oos)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--dataset", default="banking", choices=["clinc", "banking"])
     parser.add_argument("--shots", type=int, default=20)
-    parser.add_argument("--n-oos", type=int, default=20)
-    parser.add_argument("--method", default="aps", choices=["aps", "lac"])
-    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--n-oos", type=int, default=12)
+    parser.add_argument("--risk", type=float, default=0.2)
+    parser.add_argument("--seeds", type=int, default=3)
     args = parser.parse_args()
 
-    fit, cal, test, n_in, n_oos = build_splits(args.shots, args.n_oos, args.seed)
-    print(f"{n_in} in-scope intents ({args.shots}-shot), {n_oos} held-out OOS intents")
-    print(f"fit={len(fit)} cal={len(cal)} test={len(test)}")
-
+    train_by, test_by, same_pool = load_pools(args.dataset)
     encoder = SentenceEncoder()
-    model = IntentModel.fit(fit, encoder=encoder)
+    policies = [("lac", "lac", 0.0), ("aps", "aps", 0.0), ("raps", "aps", 0.1)]
 
-    header = ("risk", "coverage", "fire_rate", "fire_acc", "ambiguous", "abstain",
-              "oos_falsefire", "oos_abstain")
-    print("\n" + "  ".join(f"{h:>13}" for h in header))
-    print(f"method: {args.method}")
-    for risk in (0.05, 0.10, 0.20):
-        model.calibrate(cal, risk=risk, method=args.method)
-        r = model.evaluate(test)
-        row = (risk, r.coverage, r.fire_rate, r.fire_accuracy, r.ambiguous_rate,
-               r.abstain_rate, r.oos_false_fire, r.oos_abstain)
-        print("  ".join(f"{v:>13.3f}" for v in row))
+    fields = ["coverage", "fire_rate", "fire_accuracy", "ambiguous_rate",
+              "abstain_rate", "oos_false_fire", "oos_abstain"]
+    print(f"dataset={args.dataset} shots={args.shots} risk={args.risk} "
+          f"seeds={args.seeds}")
+    print("  ".join(f"{h:>13}" for h in ["policy", *fields]))
+
+    for name, method, reg in policies:
+        runs: list[dict] = []
+        n_in = n_oos = 0
+        for seed in range(args.seeds):
+            fit, cal, test, n_in, n_oos = build(
+                train_by, test_by, same_pool, args.shots, args.n_oos, seed
+            )
+            model = IntentModel.fit(fit, encoder=encoder)
+            model.calibrate(cal, risk=args.risk, method=method, reg_lambda=reg)
+            runs.append(model.evaluate(test).as_dict())
+        avg = [mean(r[f] for r in runs) for f in fields]
+        print("  ".join([f"{name:>13}", *[f"{v:>13.3f}" for v in avg]]))
+
+    print(f"({n_in} in-scope + {n_oos} OOS intents)")
 
 
 if __name__ == "__main__":

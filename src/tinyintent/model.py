@@ -101,6 +101,7 @@ class IntentModel:
         method: str = "aps",
         mondrian: bool = False,
         use_oos: bool = True,
+        reg_lambda: float = 0.0,
     ) -> Conformal | Aps:
         """Calibrate the decision policy at the given risk.
 
@@ -127,7 +128,9 @@ class IntentModel:
                 )
 
         if method == "aps":
-            self.policy = Aps.calibrate(scores, y, alpha=risk, oos_scores=oos_scores)
+            self.policy = Aps.calibrate(
+                scores, y, alpha=risk, oos_scores=oos_scores, reg_lambda=reg_lambda
+            )
         elif method == "lac":
             self.policy = Conformal.calibrate(
                 scores, y, alpha=risk, mondrian=mondrian, oos_scores=oos_scores

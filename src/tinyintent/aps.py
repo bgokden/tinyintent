@@ -54,6 +54,12 @@ class Aps:
     temperature: float
     q_aps: float
     gate_tau: float
+    reg_lambda: float = 0.0        # RAPS penalty on set size (0 = plain APS)
+    k_reg: int = 1                 # classes past this are penalized
+
+    def _penalty(self, n_labels: int) -> np.ndarray:
+        positions = np.arange(1, n_labels + 1)
+        return self.reg_lambda * np.maximum(0, positions - self.k_reg)
 
     @classmethod
     def calibrate(
@@ -64,18 +70,24 @@ class Aps:
         gate_risk: float = 0.05,
         oos_scores: np.ndarray | None = None,
         oos_reject: float = 0.8,
+        reg_lambda: float = 0.0,
+        k_reg: int = 1,
     ) -> "Aps":
         temperature = _fit_temperature(scores, y)
         probs = _softmax(scores / temperature)
         rows = np.arange(len(y))
+        n_labels = scores.shape[1]
 
-        # APS nonconformity: cumulative mass down to and including the true
-        # class in descending-probability order (non-randomized).
+        # Regularized APS (RAPS): cumulative mass down to and including the
+        # true class, plus a penalty for how deep in the ranking it sits.
+        # The penalty makes deep (uncertain) inclusions expensive, so sets
+        # stay small and confident inputs fire, while coverage is preserved.
         order = np.argsort(probs, axis=1)[:, ::-1]
-        sorted_p = np.take_along_axis(probs, order, axis=1)
-        cum = np.cumsum(sorted_p, axis=1)
+        cum = np.cumsum(np.take_along_axis(probs, order, axis=1), axis=1)
+        penalty = cls(alpha, temperature, 0.0, 0.0, reg_lambda, k_reg)._penalty(n_labels)
+        reg_cum = cum + penalty[None, :]
         true_pos = (order == y[:, None]).argmax(axis=1)
-        aps_scores = cum[rows, true_pos]
+        aps_scores = reg_cum[rows, true_pos]
         q_aps = float(np.quantile(aps_scores, _lac_level(len(y), alpha), method="higher"))
 
         # Abstain gate: keep >= 1 - gate_risk of in-scope inputs; raise it to
@@ -85,7 +97,7 @@ class Aps:
         if oos_scores is not None and len(oos_scores):
             gate_tau = max(gate_tau, float(np.quantile(oos_scores.max(axis=1), oos_reject)))
 
-        return cls(alpha=alpha, temperature=temperature, q_aps=q_aps, gate_tau=gate_tau)
+        return cls(alpha, temperature, q_aps, gate_tau, reg_lambda, k_reg)
 
     def prediction_set(self, scores: np.ndarray) -> np.ndarray:
         probs = _softmax(scores / self.temperature)
@@ -93,7 +105,8 @@ class Aps:
 
         order = np.argsort(probs, axis=1)[:, ::-1]
         cum = np.cumsum(np.take_along_axis(probs, order, axis=1), axis=1)
-        reached = cum >= self.q_aps
+        reg_cum = cum + self._penalty(n_labels)[None, :]
+        reached = reg_cum >= self.q_aps
         last = np.where(reached.any(axis=1), reached.argmax(axis=1), n_labels - 1)
 
         mask = np.zeros((n, n_labels), dtype=bool)
@@ -114,6 +127,8 @@ class Aps:
                     "temperature": self.temperature,
                     "q_aps": self.q_aps,
                     "gate_tau": self.gate_tau,
+                    "reg_lambda": self.reg_lambda,
+                    "k_reg": self.k_reg,
                 }
             ),
             encoding="utf-8",
@@ -127,4 +142,6 @@ class Aps:
             temperature=config["temperature"],
             q_aps=config["q_aps"],
             gate_tau=config["gate_tau"],
+            reg_lambda=config.get("reg_lambda", 0.0),
+            k_reg=config.get("k_reg", 1),
         )
