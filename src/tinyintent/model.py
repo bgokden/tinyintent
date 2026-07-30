@@ -13,6 +13,7 @@ from tinyintent.encoder import Encoder, SentenceEncoder, make_encoder
 from tinyintent.explain import nearest_example
 from tinyintent.metrics import Report, score_predictions
 from tinyintent.scorer import ExemplarScorer
+from tinyintent.transform import IdentityTransform, load_transform, make_transform
 
 
 @dataclass
@@ -47,13 +48,22 @@ class IntentModel:
         self.encoder = encoder
         self.scorer = scorer
         self.label_names = label_names
+        self.transform = IdentityTransform()
         self.policy: Conformal | Aps | None = None
         self._train_texts: list[str] = []
+
+    def _embed(self, texts: list[str]) -> np.ndarray:
+        return self.transform.apply(self.encoder.encode(texts))
 
     # -- training -----------------------------------------------------------
 
     @classmethod
-    def fit(cls, examples: list[Example], encoder: Encoder | None = None) -> "IntentModel":
+    def fit(
+        cls,
+        examples: list[Example],
+        encoder: Encoder | None = None,
+        transform: str = "none",
+    ) -> "IntentModel":
         encoder = encoder or SentenceEncoder()
         label_names = labels_of(examples, include_oos=False)
         index = {label: i for i, label in enumerate(label_names)}
@@ -61,12 +71,17 @@ class IntentModel:
         in_scope = [ex for ex in examples if ex.label != OOS_LABEL]
         texts = [ex.text for ex in in_scope]
         y = np.array([index[ex.label] for ex in in_scope], dtype=np.int64)
-        vectors = encoder.encode(texts)
+
+        base = encoder.encode(texts)
+        projector = make_transform(transform)
+        projector.fit(base, y)
+        vectors = projector.apply(base)
 
         scorer = ExemplarScorer()
         scorer.fit(vectors, y, len(label_names))
 
         model = cls(encoder, scorer, label_names)
+        model.transform = projector
         model._train_texts = texts
         return model
 
@@ -77,6 +92,7 @@ class IntentModel:
         encoder: Encoder | None = None,
         risk: float = 0.1,
         method: str = "aps",
+        transform: str = "none",
         calibrate_frac: float = 0.25,
         seed: int = 0,
     ) -> "IntentModel":
@@ -88,7 +104,7 @@ class IntentModel:
         """
 
         fit_set, cal_set = split(examples, test_frac=calibrate_frac, seed=seed)
-        model = cls.fit(fit_set, encoder=encoder)
+        model = cls.fit(fit_set, encoder=encoder, transform=transform)
         model.calibrate(cal_set, risk=risk, method=method)
         return model
 
@@ -115,7 +131,7 @@ class IntentModel:
 
         index = {label: i for i, label in enumerate(self.label_names)}
         in_scope = [ex for ex in examples if ex.label != OOS_LABEL]
-        vectors = self.encoder.encode([ex.text for ex in in_scope])
+        vectors = self._embed([ex.text for ex in in_scope])
         y = np.array([index[ex.label] for ex in in_scope], dtype=np.int64)
         scores = self.scorer.scores(vectors)
 
@@ -123,9 +139,7 @@ class IntentModel:
         if use_oos:
             oos = [ex for ex in examples if ex.label == OOS_LABEL]
             if oos:
-                oos_scores = self.scorer.scores(
-                    self.encoder.encode([ex.text for ex in oos])
-                )
+                oos_scores = self.scorer.scores(self._embed([ex.text for ex in oos]))
 
         if method == "aps":
             self.policy = Aps.calibrate(
@@ -145,7 +159,7 @@ class IntentModel:
         return self.predict_batch([text])[0]
 
     def predict_batch(self, texts: list[str]) -> list[Prediction]:
-        vectors = self.encoder.encode(texts)
+        vectors = self._embed(texts)
         scores = self.scorer.scores(vectors)
         results: list[Prediction] = []
 
@@ -188,6 +202,7 @@ class IntentModel:
         directory = Path(directory)
         directory.mkdir(parents=True, exist_ok=True)
         self.scorer.save(directory / "scorer")
+        self.transform.save(directory / "transform")
         if self.policy is not None:
             self.policy.save(directory / "policy")
         (directory / "texts.json").write_text(
@@ -198,6 +213,7 @@ class IntentModel:
                 {
                     "encoder": self.encoder.spec(),
                     "label_names": self.label_names,
+                    "transform": self.transform.name,
                     "policy": self.policy.name if self.policy is not None else None,
                 }
             ),
@@ -213,6 +229,9 @@ class IntentModel:
             make_encoder(config["encoder"]),
             ExemplarScorer.load(directory / "scorer"),
             config["label_names"],
+        )
+        model.transform = load_transform(
+            config.get("transform", "none"), directory / "transform"
         )
         policy_name = config.get("policy")
         if policy_name == "lac":

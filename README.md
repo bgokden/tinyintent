@@ -164,13 +164,20 @@ firing. Few-shot is fine (10–20 per intent).
 
 ## Encoders
 
-Default: `all-MiniLM-L6-v2` (sentence-transformers). Alternatives via the
-pluggable `Encoder` protocol:
+Default: `BAAI/bge-small-en-v1.5` — it beat `all-MiniLM-L6-v2` on the intent
+benchmarks (higher coverage and fire accuracy, lower near-OOS false-fire)
+while staying small and frozen. Alternatives via the pluggable `Encoder`
+protocol:
 
+- `SentenceEncoder("sentence-transformers/all-MiniLM-L6-v2")` — lighter.
 - `StaticEncoder` — Model2Vec static embeddings, **numpy-only, no torch**,
   for the smallest footprint (`uv sync --extra static`). Faster and tiny,
   but weaker on phrasing/negation.
 - `HashingEncoder` — dependency-free stub used in tests.
+
+An optional LDA metric-learning transform (`fit(..., transform="lda")`)
+sharpens class separation but lowered coverage in testing, so it is off by
+default.
 
 ## Layout
 

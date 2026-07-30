@@ -76,20 +76,22 @@ def build(train_by, test_by, same_pool, shots, n_oos, seed):
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset", default="banking", choices=["clinc", "banking"])
+    parser.add_argument("--encoder-model", default="sentence-transformers/all-MiniLM-L6-v2")
     parser.add_argument("--shots", type=int, default=20)
     parser.add_argument("--n-oos", type=int, default=12)
     parser.add_argument("--risk", type=float, default=0.2)
+    parser.add_argument("--transform", default="none", choices=["none", "lda"])
     parser.add_argument("--seeds", type=int, default=3)
     args = parser.parse_args()
 
     train_by, test_by, same_pool = load_pools(args.dataset)
-    encoder = SentenceEncoder()
+    encoder = SentenceEncoder(args.encoder_model)
     policies = [("lac", "lac", 0.0), ("aps", "aps", 0.0), ("raps", "aps", 0.1)]
 
     fields = ["coverage", "fire_rate", "fire_accuracy", "ambiguous_rate",
               "abstain_rate", "oos_false_fire", "oos_abstain"]
-    print(f"dataset={args.dataset} shots={args.shots} risk={args.risk} "
-          f"seeds={args.seeds}")
+    print(f"dataset={args.dataset} encoder={args.encoder_model.split('/')[-1]} "
+          f"shots={args.shots} risk={args.risk} seeds={args.seeds}")
     print("  ".join(f"{h:>13}" for h in ["policy", *fields]))
 
     for name, method, reg in policies:
@@ -99,7 +101,7 @@ def main() -> None:
             fit, cal, test, n_in, n_oos = build(
                 train_by, test_by, same_pool, args.shots, args.n_oos, seed
             )
-            model = IntentModel.fit(fit, encoder=encoder)
+            model = IntentModel.fit(fit, encoder=encoder, transform=args.transform)
             model.calibrate(cal, risk=args.risk, method=method, reg_lambda=reg)
             runs.append(model.evaluate(test).as_dict())
         avg = [mean(r[f] for r in runs) for f in fields]

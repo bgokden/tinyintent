@@ -6,7 +6,9 @@ from typing import Protocol
 import numpy as np
 
 
-DEFAULT_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+# bge-small beats MiniLM on the intent benchmarks (higher coverage and fire
+# accuracy, lower near-OOS false-fire) while staying small and frozen.
+DEFAULT_MODEL = "BAAI/bge-small-en-v1.5"
 
 
 def _l2_normalize(matrix: np.ndarray) -> np.ndarray:
