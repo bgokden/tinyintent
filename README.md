@@ -151,7 +151,6 @@ src/tinyintent/
     data.py       Example, jsonl / few-shot loaders, stratified split
     encoder.py    Encoder protocol, SentenceEncoder, StaticEncoder, HashingEncoder
     scorer.py     LinearScorer (default), ExemplarScorer
-    transform.py  optional embedding transforms
     model.py      IntentModel: fit / classify / predict / evaluate / save / load
     metrics.py    top-1 accuracy report
     explain.py    nearest labelled example

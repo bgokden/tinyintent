@@ -11,7 +11,6 @@ from tinyintent.encoder import Encoder, SentenceEncoder, make_encoder
 from tinyintent.explain import nearest_example
 from tinyintent.metrics import Report, score_predictions
 from tinyintent.scorer import ExemplarScorer, load_scorer, make_scorer
-from tinyintent.transform import IdentityTransform, load_transform, make_transform
 
 
 @dataclass
@@ -43,13 +42,12 @@ class IntentModel:
         self.encoder = encoder
         self.scorer = scorer
         self.label_names = label_names
-        self.transform = IdentityTransform()
         self._train_vectors: np.ndarray | None = None
         self._train_y: np.ndarray | None = None
         self._train_texts: list[str] = []
 
     def _embed(self, texts: list[str]) -> np.ndarray:
-        return self.transform.apply(self.encoder.encode(texts))
+        return self.encoder.encode(texts)
 
     # -- training -----------------------------------------------------------
 
@@ -58,7 +56,6 @@ class IntentModel:
         cls,
         examples: list[Example],
         encoder: Encoder | None = None,
-        transform: str = "none",
         classifier: str = "linear",
     ) -> "IntentModel":
         encoder = encoder or SentenceEncoder()
@@ -69,16 +66,11 @@ class IntentModel:
         texts = [ex.text for ex in in_scope]
         y = np.array([index[ex.label] for ex in in_scope], dtype=np.int64)
 
-        base = encoder.encode(texts)
-        projector = make_transform(transform)
-        projector.fit(base, y)
-        vectors = projector.apply(base)
-
+        vectors = encoder.encode(texts)
         scorer = make_scorer(classifier)
         scorer.fit(vectors, y, len(label_names))
 
         model = cls(encoder, scorer, label_names)
-        model.transform = projector
         model._train_vectors = vectors
         model._train_y = y
         model._train_texts = texts
@@ -138,7 +130,6 @@ class IntentModel:
         directory = Path(directory)
         directory.mkdir(parents=True, exist_ok=True)
         self.scorer.save(directory / "scorer")
-        self.transform.save(directory / "transform")
         np.savez(directory / "train.npz", vectors=self._train_vectors, y=self._train_y)
         (directory / "texts.json").write_text(
             json.dumps(self._train_texts), encoding="utf-8"
@@ -148,7 +139,6 @@ class IntentModel:
                 {
                     "encoder": self.encoder.spec(),
                     "label_names": self.label_names,
-                    "transform": self.transform.name,
                     "classifier": self.scorer.name,
                 }
             ),
@@ -164,9 +154,6 @@ class IntentModel:
             make_encoder(config["encoder"]),
             load_scorer(config.get("classifier", "linear"), directory / "scorer"),
             config["label_names"],
-        )
-        model.transform = load_transform(
-            config.get("transform", "none"), directory / "transform"
         )
         train = np.load(directory / "train.npz")
         model._train_vectors = train["vectors"].astype(np.float32)

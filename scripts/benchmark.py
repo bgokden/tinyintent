@@ -63,7 +63,6 @@ def main() -> None:
     parser.add_argument("--dataset", default="banking", choices=["clinc", "banking"])
     parser.add_argument("--encoder-model", default="BAAI/bge-small-en-v1.5")
     parser.add_argument("--shots", type=int, default=20)
-    parser.add_argument("--transform", default="none", choices=["none", "lda"])
     parser.add_argument("--classifier", default="linear", choices=["exemplar", "linear"])
     parser.add_argument("--finetune", action="store_true")
     parser.add_argument("--seeds", type=int, default=3)
@@ -86,9 +85,7 @@ def main() -> None:
             )
         else:
             encoder = frozen
-        model = IntentModel.fit(
-            fit, encoder=encoder, transform=args.transform, classifier=args.classifier
-        )
+        model = IntentModel.fit(fit, encoder=encoder, classifier=args.classifier)
         accs.append(model.accuracy(test))
 
     print(f"top-1 accuracy: {mean(accs):.3f}  ({n_labels} intents)")
