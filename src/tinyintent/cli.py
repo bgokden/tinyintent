@@ -22,7 +22,9 @@ def cmd_train(args: argparse.Namespace) -> None:
         from tinyintent.finetune import finetune_encoder
         from tinyintent.encoder import DEFAULT_MODEL
 
-        encoder = finetune_encoder(data, out_dir=f"{args.out}/encoder", base_model=DEFAULT_MODEL)
+        encoder = finetune_encoder(
+            data, out_dir=f"{args.out}/encoder", base_model=DEFAULT_MODEL, epochs=args.epochs
+        )
     else:
         encoder = _make_encoder(args.encoder)
 
@@ -78,6 +80,7 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("--encoder", default="minilm", choices=["minilm", "hashing"])
     t.add_argument("--classifier", default="linear", choices=["linear", "exemplar"])
     t.add_argument("--finetune", action="store_true", help="contrastively fine-tune the encoder")
+    t.add_argument("--epochs", type=int, default=1, help="fine-tune epochs (with --finetune)")
     t.set_defaults(func=cmd_train)
 
     e = sub.add_parser("evaluate", help="evaluate a saved model on a dataset")
