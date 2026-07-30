@@ -21,7 +21,7 @@ from tinyintent.finetune import finetune_encoder
 from tinyintent.gate import DecisiveGate
 from tinyintent.metrics import Report, score_predictions
 from tinyintent.model import IntentModel, Prediction
-from tinyintent.scorer import ExemplarScorer
+from tinyintent.scorer import ExemplarScorer, LinearScorer
 
 
 __all__ = [
@@ -34,6 +34,7 @@ __all__ = [
     "ExemplarScorer",
     "HashingEncoder",
     "IntentModel",
+    "LinearScorer",
     "OOS_LABEL",
     "Prediction",
     "Report",

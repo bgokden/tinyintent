@@ -13,7 +13,7 @@ from tinyintent.data import OOS_LABEL, Example, labels_of, split
 from tinyintent.encoder import Encoder, SentenceEncoder, make_encoder
 from tinyintent.explain import nearest_example
 from tinyintent.metrics import Report, score_predictions
-from tinyintent.scorer import ExemplarScorer
+from tinyintent.scorer import ExemplarScorer, load_scorer, make_scorer
 from tinyintent.transform import IdentityTransform, load_transform, make_transform
 
 
@@ -50,7 +50,9 @@ class IntentModel:
         self.scorer = scorer
         self.label_names = label_names
         self.transform = IdentityTransform()
-        self.policy: Conformal | Aps | None = None
+        self.policy: Conformal | Aps | DecisiveGate | None = None
+        self._train_vectors: np.ndarray | None = None
+        self._train_y: np.ndarray | None = None
         self._train_texts: list[str] = []
 
     def _embed(self, texts: list[str]) -> np.ndarray:
@@ -64,6 +66,7 @@ class IntentModel:
         examples: list[Example],
         encoder: Encoder | None = None,
         transform: str = "none",
+        classifier: str = "exemplar",
     ) -> "IntentModel":
         encoder = encoder or SentenceEncoder()
         label_names = labels_of(examples, include_oos=False)
@@ -78,11 +81,13 @@ class IntentModel:
         projector.fit(base, y)
         vectors = projector.apply(base)
 
-        scorer = ExemplarScorer()
+        scorer = make_scorer(classifier)
         scorer.fit(vectors, y, len(label_names))
 
         model = cls(encoder, scorer, label_names)
         model.transform = projector
+        model._train_vectors = vectors
+        model._train_y = y
         model._train_texts = texts
         return model
 
@@ -94,6 +99,7 @@ class IntentModel:
         risk: float = 0.1,
         method: str = "aps",
         transform: str = "none",
+        classifier: str = "exemplar",
         calibrate_frac: float = 0.25,
         seed: int = 0,
     ) -> "IntentModel":
@@ -105,7 +111,7 @@ class IntentModel:
         """
 
         fit_set, cal_set = split(examples, test_frac=calibrate_frac, seed=seed)
-        model = cls.fit(fit_set, encoder=encoder, transform=transform)
+        model = cls.fit(fit_set, encoder=encoder, transform=transform, classifier=classifier)
         model.calibrate(cal_set, risk=risk, method=method)
         return model
 
@@ -196,7 +202,7 @@ class IntentModel:
 
             explanation = nearest_example(
                 vectors[row], top_idx,
-                self.scorer.vectors, self.scorer.exemplar_label, self._train_texts,
+                self._train_vectors, self._train_y, self._train_texts,
             )
             results.append(Prediction(decision, intent, top, set_, explanation))
         return results
@@ -207,6 +213,27 @@ class IntentModel:
             [ex.label for ex in examples], preds, self.label_names, OOS_LABEL
         )
 
+    # -- always-decide top-1 (no policy, no abstain) ------------------------
+
+    def classify(self, text: str) -> str:
+        return self.classify_batch([text])[0]
+
+    def classify_batch(self, texts: list[str]) -> list[str]:
+        """Return the single best intent for each text, always deciding."""
+
+        scores = self.scorer.scores(self._embed(texts))
+        return [self.label_names[int(i)] for i in scores.argmax(axis=1)]
+
+    def accuracy(self, examples: list[Example]) -> float:
+        """Top-1 accuracy on the in-scope examples."""
+
+        in_scope = [ex for ex in examples if ex.label != OOS_LABEL]
+        if not in_scope:
+            return 0.0
+        preds = self.classify_batch([ex.text for ex in in_scope])
+        correct = sum(p == ex.label for p, ex in zip(preds, in_scope, strict=True))
+        return correct / len(in_scope)
+
     # -- persistence --------------------------------------------------------
 
     def save(self, directory: str | Path) -> None:
@@ -216,6 +243,7 @@ class IntentModel:
         self.transform.save(directory / "transform")
         if self.policy is not None:
             self.policy.save(directory / "policy")
+        np.savez(directory / "train.npz", vectors=self._train_vectors, y=self._train_y)
         (directory / "texts.json").write_text(
             json.dumps(self._train_texts), encoding="utf-8"
         )
@@ -225,6 +253,7 @@ class IntentModel:
                     "encoder": self.encoder.spec(),
                     "label_names": self.label_names,
                     "transform": self.transform.name,
+                    "classifier": self.scorer.name,
                     "policy": self.policy.name if self.policy is not None else None,
                 }
             ),
@@ -238,7 +267,7 @@ class IntentModel:
 
         model = cls(
             make_encoder(config["encoder"]),
-            ExemplarScorer.load(directory / "scorer"),
+            load_scorer(config.get("classifier", "exemplar"), directory / "scorer"),
             config["label_names"],
         )
         model.transform = load_transform(
@@ -251,6 +280,10 @@ class IntentModel:
             model.policy = Aps.load(directory / "policy")
         elif policy_name == "gate":
             model.policy = DecisiveGate.load(directory / "policy")
+
+        train = np.load(directory / "train.npz")
+        model._train_vectors = train["vectors"].astype(np.float32)
+        model._train_y = train["y"].astype(np.int64)
         model._train_texts = json.loads(
             (directory / "texts.json").read_text(encoding="utf-8")
         )

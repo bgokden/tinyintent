@@ -27,13 +27,15 @@ def cmd_train(args: argparse.Namespace) -> None:
     else:
         encoder = _make_encoder(args.encoder)
 
-    model = IntentModel.fit(fit_set, encoder=encoder)
-    policy = model.calibrate(cal_set, risk=args.risk, method=args.method)
+    model = IntentModel.fit(fit_set, encoder=encoder, classifier=args.classifier)
+    print(f"Trained on {len(fit_set)} examples, {len(model.label_names)} intents "
+          f"(classifier={args.classifier})")
+    if args.method == "none":
+        print("No policy: predict always decides the single best intent")
+    else:
+        policy = model.calibrate(cal_set, risk=args.risk, method=args.method)
+        print(f"Calibrated on {len(cal_set)} using policy '{policy.name}'")
     model.save(args.out)
-
-    print(f"Trained on {len(fit_set)} examples, {len(model.label_names)} intents: "
-          f"{model.label_names}")
-    print(f"Calibrated on {len(cal_set)} using policy '{policy.name}'")
     print(f"Saved model to {args.out}")
 
 
@@ -80,7 +82,9 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("--data", required=True)
     t.add_argument("--out", required=True)
     t.add_argument("--encoder", default="minilm", choices=["minilm", "hashing"])
-    t.add_argument("--method", default="aps", choices=["aps", "lac", "gate"])
+    t.add_argument("--method", default="none", choices=["none", "aps", "lac", "gate"],
+                   help="none = always decide top-1; others add abstain/reject")
+    t.add_argument("--classifier", default="linear", choices=["linear", "exemplar"])
     t.add_argument("--finetune", action="store_true", help="contrastively fine-tune the encoder")
     t.add_argument("--risk", type=float, default=0.1, help="conformal alpha")
     t.add_argument("--calibrate-frac", type=float, default=0.25)

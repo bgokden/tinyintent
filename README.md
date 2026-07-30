@@ -1,57 +1,46 @@
 # tinyintent
 
-A small, portable **selective** intent classifier. Give it labelled
-utterances and it produces a model that, for a new utterance, returns a
-risk-controlled decision — **fire** one intent, **abstain**, or flag it
-**ambiguous** — with a plain-language explanation. Frozen sentence
-embeddings, no LLM at inference.
-
-It is intentionally opinionated: one scoring method, one principled
-decision layer.
+A small, portable intent classifier. Give it labelled utterances and it
+maps text to the single best intent — accurately, on CPU, with no LLM in
+the loop. Frozen sentence embeddings plus a light classifier head; a few
+example utterances per intent is enough.
 
 ```
 utterance
-  -> frozen encoder (MiniLM by default)
-  -> exemplar similarity per intent        (max cosine to each class)
-  -> conformal prediction set at risk a     (coverage >= 1 - a)
-  -> |set| = 0 abstain | = 1 fire | >= 2 ambiguous
+  -> frozen encoder (bge-small by default)
+  -> linear classifier head
+  -> top-1 intent   (always decides)
 ```
 
-## No fallback? Use the decisive gate
+## Primary use: accurate top-1 classification
 
-If you have no LLM to escalate to, the "ambiguous" outcome is a liability —
-it defers a decision you can't defer. The `gate` policy removes it: every
-input either **fires one intent** or is **rejected** (out-of-scope), two
-terminal outcomes, no escalation. Combined with a fine-tuned encoder (which
-makes out-of-scope separable), it is a self-contained router:
+The default is to **always decide** — return the single best intent for
+every input. Top-1 accuracy (20-shot, frozen `bge-small`, averaged over
+seeds):
 
-| dataset (fine-tuned bge, gate) | fire rate | fire accuracy | OOS rejected | ambiguous |
-|---|---:|---:|---:|---:|
-| CLINC150 | 0.80 | 0.99 | 0.91 | **0.00** |
-| Banking77 | 0.67 | 0.95 | 0.90 | **0.00** |
+| dataset | exemplar head | **linear head (default)** | + fine-tune |
+|---|---:|---:|---:|
+| CLINC150 | 0.92 | **0.96** | 0.96 |
+| Banking77 | 0.89 | **0.90** | 0.90 |
+
+The linear (logistic-regression) head learns a boundary instead of trusting
+the single nearest example, which is why it wins for pure accuracy. No
+fine-tuning needed for CLINC-level results; fine-tuning helps most when
+intents are close (see below).
 
 ```bash
-uv run tinyintent train --data intents.jsonl --out model --finetune --method gate
+uv run tinyintent train --data intents.jsonl --out model      # linear, always decide
+uv run tinyintent predict --model model "cancel my order"
+# Python: IntentModel.fit(examples, classifier="linear").classify("cancel my order")
 ```
 
-Rejected inputs (in-scope the gate wasn't sure about, plus caught OOS) go to
-your default/reject handler — not a model. `reject_level` trades in-scope
-firing against OOS rejection; more shots and fine-tuning push both up.
+## Optional: abstain or reject instead of always deciding
 
-## Why selective, not just a classifier
-
-If a wrong intent triggers a workflow, "always pick the top class" is the
-wrong behaviour. tinyintent is built around *declining*:
-
-- **Conformal prediction** gives a distribution-free guarantee — set the
-  risk `a`, and the true intent is in the returned set at least `1 - a` of
-  the time on in-scope data.
-- The set is over **absolute** exemplar similarity (not softmax), so an
-  utterance far from every intent produces an **empty set** and abstains.
-  This is what a relative softmax cannot do — it always names a winner.
-- One mechanism covers the three outcomes you actually care about: nothing
-  (abstain / out-of-scope), one (fire), or several (ambiguous → clarify or
-  escalate to an LLM).
+If you would rather decline on uncertain or out-of-scope input than force a
+guess, add a decision policy (`--method`): `gate` (fire top-1 or reject),
+`aps` (safety-first prediction sets), or `lac` (a single threshold). These
+trade some coverage for restraint and are documented below; the default is
+to skip them and always decide.
 
 ## Benchmark
 

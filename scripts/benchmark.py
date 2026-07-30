@@ -82,6 +82,7 @@ def main() -> None:
     parser.add_argument("--n-oos", type=int, default=12)
     parser.add_argument("--risk", type=float, default=0.2)
     parser.add_argument("--transform", default="none", choices=["none", "lda"])
+    parser.add_argument("--classifier", default="exemplar", choices=["exemplar", "linear"])
     parser.add_argument("--finetune", action="store_true")
     parser.add_argument("--reject-level", type=float, default=0.1)
     parser.add_argument("--seeds", type=int, default=3)
@@ -112,8 +113,13 @@ def main() -> None:
             )
         else:
             encoder = frozen
-        model = IntentModel.fit(fit, encoder=encoder, transform=args.transform)
+        model = IntentModel.fit(
+            fit, encoder=encoder, transform=args.transform, classifier=args.classifier
+        )
         seed_models.append((model, cal, test))
+
+    top1 = mean(model.accuracy(test) for model, _, test in seed_models)
+    print(f"top-1 accuracy (always decide, classifier={args.classifier}): {top1:.3f}\n")
 
     for name, method, reg in policies:
         runs = []
