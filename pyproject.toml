@@ -22,5 +22,6 @@ packages = ["src/tinyintent"]
 
 [dependency-groups]
 dev = [
+    "datasets>=5.0.1",
     "pytest>=9.1.1",
 ]

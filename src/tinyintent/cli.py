@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
 
 from tinyintent.data import load_jsonl, split
 from tinyintent.encoder import HashingEncoder, SentenceEncoder
@@ -20,32 +19,30 @@ def cmd_train(args: argparse.Namespace) -> None:
     data = load_jsonl(args.data)
     fit_set, cal_set = split(data, test_frac=args.calibrate_frac, seed=args.seed)
 
-    encoder = _make_encoder(args.encoder)
-    model = IntentModel.fit(fit_set, head=args.head, encoder=encoder)
-    policy = model.calibrate(cal_set, max_false_fire=args.max_false_fire)
+    model = IntentModel.fit(fit_set, encoder=_make_encoder(args.encoder))
+    conformal = model.calibrate(cal_set, risk=args.risk)
     model.save(args.out)
 
-    print(f"Trained head '{args.head}' on {len(fit_set)} examples, "
-          f"{len(model.label_names)} intents: {model.label_names}")
-    print(f"Calibrated on {len(cal_set)}: threshold={policy.threshold:.3f} "
-          f"margin={policy.margin:.3f}")
+    print(f"Trained on {len(fit_set)} examples, {len(model.label_names)} intents: "
+          f"{model.label_names}")
+    print(f"Calibrated on {len(cal_set)} at risk={conformal.alpha} "
+          f"(similarity threshold 1-q = {1 - conformal.q:.3f})")
     print(f"Saved model to {args.out}")
 
 
 def cmd_evaluate(args: argparse.Namespace) -> None:
     model = IntentModel.load(args.model)
-    report = model.evaluate(load_jsonl(args.data))
-    for key, value in report.as_dict().items():
+    for key, value in model.evaluate(load_jsonl(args.data)).as_dict().items():
         print(f"  {key}: {value}")
 
 
 def _show(text: str, model: IntentModel) -> None:
     p = model.predict(text)
-    label = p.intent if p.intent is not None else "(abstain)"
     print(f"\n> {text}")
-    print(f"  intent: {label}   score: {p.score:.3f}")
-    alts = ", ".join(f"{l} {s:.2f}" for l, s in p.alternatives)
-    print(f"  ranked: {alts}")
+    print(f"  decision: {p.decision}" + (f"  ->  {p.intent}" if p.intent else ""))
+    set_str = ", ".join(f"{l} {s:.2f}" for l, s in p.set_) or "(empty)"
+    print(f"  prediction set: {set_str}")
+    print(f"  top: {p.top[0]} {p.top[1]:.2f}")
     if p.explanation:
         print(f"  nearest example: \"{p.explanation['text']}\" "
               f"({p.explanation['similarity']:.2f})")
@@ -75,10 +72,9 @@ def build_parser() -> argparse.ArgumentParser:
     t = sub.add_parser("train", help="train and calibrate an intent model")
     t.add_argument("--data", required=True)
     t.add_argument("--out", required=True)
-    t.add_argument("--head", default="prototype", choices=["prototype", "logreg", "mlp"])
     t.add_argument("--encoder", default="minilm", choices=["minilm", "hashing"])
+    t.add_argument("--risk", type=float, default=0.1, help="conformal alpha")
     t.add_argument("--calibrate-frac", type=float, default=0.25)
-    t.add_argument("--max-false-fire", type=float, default=0.02)
     t.add_argument("--seed", type=int, default=0)
     t.set_defaults(func=cmd_train)
 
