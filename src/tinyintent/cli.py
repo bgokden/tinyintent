@@ -19,7 +19,15 @@ def cmd_train(args: argparse.Namespace) -> None:
     data = load_jsonl(args.data)
     fit_set, cal_set = split(data, test_frac=args.calibrate_frac, seed=args.seed)
 
-    model = IntentModel.fit(fit_set, encoder=_make_encoder(args.encoder))
+    if args.finetune:
+        from tinyintent.finetune import finetune_encoder
+        from tinyintent.encoder import DEFAULT_MODEL
+
+        encoder = finetune_encoder(fit_set, out_dir=f"{args.out}/encoder", base_model=DEFAULT_MODEL)
+    else:
+        encoder = _make_encoder(args.encoder)
+
+    model = IntentModel.fit(fit_set, encoder=encoder)
     policy = model.calibrate(cal_set, risk=args.risk, method=args.method)
     model.save(args.out)
 
@@ -73,6 +81,7 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("--out", required=True)
     t.add_argument("--encoder", default="minilm", choices=["minilm", "hashing"])
     t.add_argument("--method", default="aps", choices=["aps", "lac"])
+    t.add_argument("--finetune", action="store_true", help="contrastively fine-tune the encoder")
     t.add_argument("--risk", type=float, default=0.1, help="conformal alpha")
     t.add_argument("--calibrate-frac", type=float, default=0.25)
     t.add_argument("--seed", type=int, default=0)

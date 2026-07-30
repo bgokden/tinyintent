@@ -17,6 +17,10 @@ tinyintent = "tinyintent.cli:main"
 static = [
     "model2vec>=0.8.2",
 ]
+train = [
+    "accelerate>=1.1.0",
+    "datasets>=5.0.1",
+]
 
 [build-system]
 requires = ["hatchling"]

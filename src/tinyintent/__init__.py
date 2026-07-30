@@ -17,6 +17,7 @@ from tinyintent.encoder import (
     SentenceEncoder,
     make_encoder,
 )
+from tinyintent.finetune import finetune_encoder
 from tinyintent.metrics import Report, score_predictions
 from tinyintent.model import IntentModel, Prediction
 from tinyintent.scorer import ExemplarScorer
@@ -35,6 +36,7 @@ __all__ = [
     "Prediction",
     "Report",
     "SentenceEncoder",
+    "finetune_encoder",
     "from_fewshot",
     "labels_of",
     "load_jsonl",

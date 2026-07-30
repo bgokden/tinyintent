@@ -22,6 +22,7 @@ from statistics import mean
 from datasets import load_dataset
 
 from tinyintent import Example, IntentModel, SentenceEncoder
+from tinyintent.finetune import finetune_encoder
 
 
 def load_pools(dataset: str):
@@ -81,27 +82,41 @@ def main() -> None:
     parser.add_argument("--n-oos", type=int, default=12)
     parser.add_argument("--risk", type=float, default=0.2)
     parser.add_argument("--transform", default="none", choices=["none", "lda"])
+    parser.add_argument("--finetune", action="store_true")
     parser.add_argument("--seeds", type=int, default=3)
     args = parser.parse_args()
 
     train_by, test_by, same_pool = load_pools(args.dataset)
-    encoder = SentenceEncoder(args.encoder_model)
+    frozen = None if args.finetune else SentenceEncoder(args.encoder_model)
     policies = [("lac", "lac", 0.0), ("aps", "aps", 0.0), ("raps", "aps", 0.1)]
 
     fields = ["coverage", "fire_rate", "fire_accuracy", "ambiguous_rate",
               "abstain_rate", "oos_false_fire", "oos_abstain"]
     print(f"dataset={args.dataset} encoder={args.encoder_model.split('/')[-1]} "
-          f"shots={args.shots} risk={args.risk} seeds={args.seeds}")
+          f"finetune={args.finetune} shots={args.shots} risk={args.risk} "
+          f"seeds={args.seeds}")
     print("  ".join(f"{h:>13}" for h in ["policy", *fields]))
 
-    for name, method, reg in policies:
-        runs: list[dict] = []
-        n_in = n_oos = 0
-        for seed in range(args.seeds):
-            fit, cal, test, n_in, n_oos = build(
-                train_by, test_by, same_pool, args.shots, args.n_oos, seed
+    # Fit each seed's model once (fine-tuning is the expensive part), reused
+    # across policies.
+    seed_models: list[tuple] = []
+    for seed in range(args.seeds):
+        fit, cal, test, n_in, n_oos = build(
+            train_by, test_by, same_pool, args.shots, args.n_oos, seed
+        )
+        if args.finetune:
+            encoder = finetune_encoder(
+                fit, out_dir=f"/tmp/tinyintent_ft_{args.dataset}_{seed}",
+                base_model=args.encoder_model,
             )
-            model = IntentModel.fit(fit, encoder=encoder, transform=args.transform)
+        else:
+            encoder = frozen
+        model = IntentModel.fit(fit, encoder=encoder, transform=args.transform)
+        seed_models.append((model, cal, test))
+
+    for name, method, reg in policies:
+        runs = []
+        for model, cal, test in seed_models:
             model.calibrate(cal, risk=args.risk, method=method, reg_lambda=reg)
             runs.append(model.evaluate(test).as_dict())
         avg = [mean(r[f] for r in runs) for f in fields]

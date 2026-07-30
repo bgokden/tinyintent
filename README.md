@@ -61,10 +61,33 @@ Pick by the cost of a wrong workflow versus the cost of escalating. The same
 pattern holds on CLINC150.
 
 The decisiveness ceiling is the frozen-encoder ranking, not the set method:
-regularized APS (RAPS, `reg_lambda`) was tried and did not help across a
-lambda/k_reg sweep and both datasets, so it defaults off. Lifting decisiveness
-needs a better ranking (more shots, a stronger encoder), not a different
-conformal rule.
+regularized APS (RAPS, `reg_lambda`) and an LDA transform were both tried and
+did not help. The one thing that does is **fine-tuning the encoder** (see
+below), which lifts the decisive LAC policy substantially:
+
+| setup | fire rate | fire acc | ambiguous | coverage |
+|---|---:|---:|---:|---:|
+| frozen bge + LAC (CLINC) | 0.60 | 0.98 | 0.15 | 0.74 |
+| **fine-tuned bge + LAC (CLINC)** | **0.79** | **0.99** | **0.02** | **0.81** |
+
+## Fine-tuning (optional)
+
+Frozen embeddings cap how often the true intent ranks first among many close
+intents. A short contrastive fine-tune (SetFit body recipe: same-intent pairs
+with in-batch negatives) specializes the encoder and fixes that ranking. It
+is the one lever that meaningfully raises decisiveness — validated on CLINC150
+and Banking77 — and it stays a plain SentenceTransformer afterwards, used
+frozen by the rest of the pipeline.
+
+```bash
+uv sync --extra train
+uv run tinyintent train --data intents.jsonl --out model --finetune --method lac
+# or in Python: from tinyintent import finetune_encoder
+```
+
+It needs a training step (a minute or two on a GPU) and breaks the pure
+zero-training story, so it is opt-in. APS stays conservative either way; pair
+fine-tuning with the decisive LAC policy.
 
 ## Install
 
