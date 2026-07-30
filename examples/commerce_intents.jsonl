@@ -1,0 +1,53 @@
+{"text": "I want to buy this laptop", "label": "buy"}
+{"text": "how do I purchase this item", "label": "buy"}
+{"text": "add it to my cart and check out", "label": "buy"}
+{"text": "place an order for two of these", "label": "buy"}
+{"text": "I'd like to order the blue one", "label": "buy"}
+{"text": "can I get this delivered to my address", "label": "buy"}
+{"text": "buy now with express shipping", "label": "buy"}
+{"text": "complete my purchase", "label": "buy"}
+{"text": "I want to sell my old phone", "label": "sell"}
+{"text": "list my bike for sale", "label": "sell"}
+{"text": "how do I put an item up for sale", "label": "sell"}
+{"text": "I have a couch I want to get rid of for cash", "label": "sell"}
+{"text": "create a listing to sell my camera", "label": "sell"}
+{"text": "sell my car on your platform", "label": "sell"}
+{"text": "what is the fee to sell something here", "label": "sell"}
+{"text": "post my guitar for sale", "label": "sell"}
+{"text": "I want to rent an apartment downtown", "label": "rent"}
+{"text": "lease a flat for six months", "label": "rent"}
+{"text": "rent a car for the weekend", "label": "rent"}
+{"text": "looking for a place to rent near the office", "label": "rent"}
+{"text": "what are the monthly rental options", "label": "rent"}
+{"text": "I need to hire a van for one day", "label": "rent"}
+{"text": "book a short term rental", "label": "rent"}
+{"text": "rent out a studio for a week", "label": "rent"}
+{"text": "cancel my order", "label": "cancel_order"}
+{"text": "I want to cancel order 4471", "label": "cancel_order"}
+{"text": "please stop my recent purchase", "label": "cancel_order"}
+{"text": "call off the delivery I just made", "label": "cancel_order"}
+{"text": "I changed my mind, cancel it", "label": "cancel_order"}
+{"text": "abort my last transaction", "label": "cancel_order"}
+{"text": "can you cancel the subscription order", "label": "cancel_order"}
+{"text": "where is my order", "label": "track_order"}
+{"text": "track my package", "label": "track_order"}
+{"text": "what is the status of my delivery", "label": "track_order"}
+{"text": "has my order shipped yet", "label": "track_order"}
+{"text": "when will my parcel arrive", "label": "track_order"}
+{"text": "give me a tracking update", "label": "track_order"}
+{"text": "my order is late, where is it", "label": "track_order"}
+{"text": "I want a refund", "label": "refund"}
+{"text": "give me my money back", "label": "refund"}
+{"text": "how do I return this and get refunded", "label": "refund"}
+{"text": "this item is broken, I want a refund", "label": "refund"}
+{"text": "process a refund for my last order", "label": "refund"}
+{"text": "I need my payment reversed", "label": "refund"}
+{"text": "request a refund for order 883", "label": "refund"}
+{"text": "what's the weather like today", "label": "oos"}
+{"text": "tell me a joke", "label": "oos"}
+{"text": "who won the football match last night", "label": "oos"}
+{"text": "what time is it in Tokyo", "label": "oos"}
+{"text": "can you play some music", "label": "oos"}
+{"text": "how tall is the Eiffel tower", "label": "oos"}
+{"text": "set an alarm for 7am", "label": "oos"}
+{"text": "translate hello into spanish", "label": "oos"}

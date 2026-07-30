@@ -1,0 +1,26 @@
+[project]
+name = "tinyintent"
+version = "0.1.0"
+description = "A small, portable intent-detection training framework: frozen embeddings, pluggable heads, abstention, and explanations"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=2.0",
+    "scikit-learn>=1.5",
+    "sentence-transformers>=3.0",
+]
+
+[project.scripts]
+tinyintent = "tinyintent.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tinyintent"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
