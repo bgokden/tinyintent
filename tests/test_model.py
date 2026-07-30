@@ -80,6 +80,18 @@ def test_aps_gate_abstains_on_out_of_scope():
     assert model.predict("completely different banana vocabulary").decision == "abstain"
 
 
+def test_gate_is_decisive_never_ambiguous():
+    data = make_data(n=14)
+    model = IntentModel.fit_calibrate(
+        data, encoder=HashingEncoder(dim=1024), method="gate", calibrate_frac=0.4
+    )
+    assert model.policy.name == "gate"
+    for query in ["alpha alpha request item", "totally foreign banana words here"]:
+        assert model.predict(query).decision in ("fire", "abstain")  # never ambiguous
+    assert model.predict("alpha alpha request item").decision == "fire"
+    assert model.predict("totally foreign banana words here").decision == "abstain"
+
+
 def test_save_load_roundtrip(tmp_path):
     model, _ = make_model()
     before = model.predict("beta beta request item")

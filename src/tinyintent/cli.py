@@ -33,7 +33,7 @@ def cmd_train(args: argparse.Namespace) -> None:
 
     print(f"Trained on {len(fit_set)} examples, {len(model.label_names)} intents: "
           f"{model.label_names}")
-    print(f"Calibrated on {len(cal_set)} at risk={policy.alpha} using '{policy.name}'")
+    print(f"Calibrated on {len(cal_set)} using policy '{policy.name}'")
     print(f"Saved model to {args.out}")
 
 
@@ -80,7 +80,7 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("--data", required=True)
     t.add_argument("--out", required=True)
     t.add_argument("--encoder", default="minilm", choices=["minilm", "hashing"])
-    t.add_argument("--method", default="aps", choices=["aps", "lac"])
+    t.add_argument("--method", default="aps", choices=["aps", "lac", "gate"])
     t.add_argument("--finetune", action="store_true", help="contrastively fine-tune the encoder")
     t.add_argument("--risk", type=float, default=0.1, help="conformal alpha")
     t.add_argument("--calibrate-frac", type=float, default=0.25)

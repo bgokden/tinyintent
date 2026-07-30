@@ -17,6 +17,27 @@ utterance
   -> |set| = 0 abstain | = 1 fire | >= 2 ambiguous
 ```
 
+## No fallback? Use the decisive gate
+
+If you have no LLM to escalate to, the "ambiguous" outcome is a liability —
+it defers a decision you can't defer. The `gate` policy removes it: every
+input either **fires one intent** or is **rejected** (out-of-scope), two
+terminal outcomes, no escalation. Combined with a fine-tuned encoder (which
+makes out-of-scope separable), it is a self-contained router:
+
+| dataset (fine-tuned bge, gate) | fire rate | fire accuracy | OOS rejected | ambiguous |
+|---|---:|---:|---:|---:|
+| CLINC150 | 0.80 | 0.99 | 0.91 | **0.00** |
+| Banking77 | 0.67 | 0.95 | 0.90 | **0.00** |
+
+```bash
+uv run tinyintent train --data intents.jsonl --out model --finetune --method gate
+```
+
+Rejected inputs (in-scope the gate wasn't sure about, plus caught OOS) go to
+your default/reject handler — not a model. `reject_level` trades in-scope
+firing against OOS rejection; more shots and fine-tuning push both up.
+
 ## Why selective, not just a classifier
 
 If a wrong intent triggers a workflow, "always pick the top class" is the

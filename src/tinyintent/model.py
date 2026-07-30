@@ -8,6 +8,7 @@ import numpy as np
 
 from tinyintent.aps import Aps
 from tinyintent.conformal import Conformal
+from tinyintent.gate import DecisiveGate
 from tinyintent.data import OOS_LABEL, Example, labels_of, split
 from tinyintent.encoder import Encoder, SentenceEncoder, make_encoder
 from tinyintent.explain import nearest_example
@@ -118,15 +119,21 @@ class IntentModel:
         mondrian: bool = False,
         use_oos: bool = True,
         reg_lambda: float = 0.0,
-    ) -> Conformal | Aps:
+        reject_level: float = 0.1,
+    ) -> Conformal | Aps | DecisiveGate:
         """Calibrate the decision policy at the given risk.
 
-        ``risk`` (alpha) is the allowed chance of dropping the true intent
-        from the set on in-scope data. ``method`` is ``aps`` (two-stage
-        gate + adaptive sets; smaller sets on close intents) or ``lac``
-        (a single absolute-similarity threshold). If the calibration data
-        contains ``oos`` examples and ``use_oos`` is set, they raise the
-        abstain bar to reduce false firing on novel input.
+        ``method`` selects the decision behaviour:
+
+        - ``aps`` (default): two-stage gate + adaptive prediction sets;
+          safety-first, may return an ambiguous set to escalate.
+        - ``lac``: a single absolute-similarity threshold.
+        - ``gate``: decisive fire-top-1-or-reject with no ambiguous outcome,
+          for systems with no fallback (tune with ``reject_level``).
+
+        ``risk`` (alpha) is the conformal miss rate for ``aps``/``lac``. If
+        the calibration data contains ``oos`` examples and ``use_oos`` is
+        set, they raise the abstain/reject bar.
         """
 
         index = {label: i for i, label in enumerate(self.label_names)}
@@ -149,8 +156,12 @@ class IntentModel:
             self.policy = Conformal.calibrate(
                 scores, y, alpha=risk, mondrian=mondrian, oos_scores=oos_scores
             )
+        elif method == "gate":
+            self.policy = DecisiveGate.calibrate(
+                scores, y, reject_level=reject_level, oos_scores=oos_scores
+            )
         else:
-            raise ValueError(f"unknown method: {method} (choose aps or lac)")
+            raise ValueError(f"unknown method: {method} (choose aps, lac, or gate)")
         return self.policy
 
     # -- inference ----------------------------------------------------------
@@ -238,6 +249,8 @@ class IntentModel:
             model.policy = Conformal.load(directory / "policy")
         elif policy_name == "aps":
             model.policy = Aps.load(directory / "policy")
+        elif policy_name == "gate":
+            model.policy = DecisiveGate.load(directory / "policy")
         model._train_texts = json.loads(
             (directory / "texts.json").read_text(encoding="utf-8")
         )

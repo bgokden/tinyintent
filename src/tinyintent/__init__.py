@@ -18,6 +18,7 @@ from tinyintent.encoder import (
     make_encoder,
 )
 from tinyintent.finetune import finetune_encoder
+from tinyintent.gate import DecisiveGate
 from tinyintent.metrics import Report, score_predictions
 from tinyintent.model import IntentModel, Prediction
 from tinyintent.scorer import ExemplarScorer
@@ -27,6 +28,7 @@ __all__ = [
     "DEFAULT_MODEL",
     "Aps",
     "Conformal",
+    "DecisiveGate",
     "Encoder",
     "Example",
     "ExemplarScorer",

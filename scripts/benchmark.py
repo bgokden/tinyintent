@@ -83,12 +83,13 @@ def main() -> None:
     parser.add_argument("--risk", type=float, default=0.2)
     parser.add_argument("--transform", default="none", choices=["none", "lda"])
     parser.add_argument("--finetune", action="store_true")
+    parser.add_argument("--reject-level", type=float, default=0.1)
     parser.add_argument("--seeds", type=int, default=3)
     args = parser.parse_args()
 
     train_by, test_by, same_pool = load_pools(args.dataset)
     frozen = None if args.finetune else SentenceEncoder(args.encoder_model)
-    policies = [("lac", "lac", 0.0), ("aps", "aps", 0.0), ("raps", "aps", 0.1)]
+    policies = [("gate", "gate", 0.0), ("lac", "lac", 0.0), ("aps", "aps", 0.0)]
 
     fields = ["coverage", "fire_rate", "fire_accuracy", "ambiguous_rate",
               "abstain_rate", "oos_false_fire", "oos_abstain"]
@@ -117,7 +118,8 @@ def main() -> None:
     for name, method, reg in policies:
         runs = []
         for model, cal, test in seed_models:
-            model.calibrate(cal, risk=args.risk, method=method, reg_lambda=reg)
+            model.calibrate(cal, risk=args.risk, method=method, reg_lambda=reg,
+                            reject_level=args.reject_level)
             runs.append(model.evaluate(test).as_dict())
         avg = [mean(r[f] for r in runs) for f in fields]
         print("  ".join([f"{name:>13}", *[f"{v:>13.3f}" for v in avg]]))
