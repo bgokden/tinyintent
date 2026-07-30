@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from tinyintent.aps import Aps
 from tinyintent.conformal import Conformal
 from tinyintent.data import (
     OOS_LABEL,
@@ -23,6 +24,7 @@ from tinyintent.scorer import ExemplarScorer
 
 __all__ = [
     "DEFAULT_MODEL",
+    "Aps",
     "Conformal",
     "Encoder",
     "Example",

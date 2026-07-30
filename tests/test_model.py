@@ -65,10 +65,19 @@ def test_oos_floor_raises_with_negatives():
     data = make_data(n=14)
     fit_set, cal_set = split(data, test_frac=0.4, seed=0)   # cal keeps some oos
     model = IntentModel.fit(fit_set, encoder=HashingEncoder(dim=1024))
-    model.calibrate(cal_set, risk=0.1, use_oos=True)
+    model.calibrate(cal_set, risk=0.1, method="lac", use_oos=True)
 
-    assert model.conformal.floor > -1.0                     # negatives lifted the floor
+    assert model.policy.floor > -1.0                        # negatives lifted the floor
     assert model.predict("alpha alpha request item").intent == "a"  # in-scope still fires
+
+
+def test_aps_gate_abstains_on_out_of_scope():
+    data = make_data(n=14)
+    model = IntentModel.fit_calibrate(
+        data, encoder=HashingEncoder(dim=1024), risk=0.1, method="aps", calibrate_frac=0.4
+    )
+    assert model.policy.name == "aps"
+    assert model.predict("completely different banana vocabulary").decision == "abstain"
 
 
 def test_save_load_roundtrip(tmp_path):
@@ -81,4 +90,4 @@ def test_save_load_roundtrip(tmp_path):
     assert before.decision == after.decision
     assert before.intent == after.intent
     assert np.isclose(before.top[1], after.top[1], atol=1e-5)
-    assert reloaded.conformal.q == pytest.approx(model.conformal.q)
+    assert reloaded.policy.name == model.policy.name

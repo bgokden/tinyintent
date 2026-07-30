@@ -50,6 +50,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--shots", type=int, default=20)
     parser.add_argument("--n-oos", type=int, default=20)
+    parser.add_argument("--method", default="aps", choices=["aps", "lac"])
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
 
@@ -63,8 +64,9 @@ def main() -> None:
     header = ("risk", "coverage", "fire_rate", "fire_acc", "ambiguous", "abstain",
               "oos_falsefire", "oos_abstain")
     print("\n" + "  ".join(f"{h:>13}" for h in header))
+    print(f"method: {args.method}")
     for risk in (0.05, 0.10, 0.20):
-        model.calibrate(cal, risk=risk)
+        model.calibrate(cal, risk=risk, method=args.method)
         r = model.evaluate(test)
         row = (risk, r.coverage, r.fire_rate, r.fire_accuracy, r.ambiguous_rate,
                r.abstain_rate, r.oos_false_fire, r.oos_abstain)

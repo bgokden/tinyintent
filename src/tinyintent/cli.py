@@ -20,13 +20,12 @@ def cmd_train(args: argparse.Namespace) -> None:
     fit_set, cal_set = split(data, test_frac=args.calibrate_frac, seed=args.seed)
 
     model = IntentModel.fit(fit_set, encoder=_make_encoder(args.encoder))
-    conformal = model.calibrate(cal_set, risk=args.risk)
+    policy = model.calibrate(cal_set, risk=args.risk, method=args.method)
     model.save(args.out)
 
     print(f"Trained on {len(fit_set)} examples, {len(model.label_names)} intents: "
           f"{model.label_names}")
-    print(f"Calibrated on {len(cal_set)} at risk={conformal.alpha} "
-          f"(similarity threshold 1-q = {1 - conformal.q:.3f})")
+    print(f"Calibrated on {len(cal_set)} at risk={policy.alpha} using '{policy.name}'")
     print(f"Saved model to {args.out}")
 
 
@@ -73,6 +72,7 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("--data", required=True)
     t.add_argument("--out", required=True)
     t.add_argument("--encoder", default="minilm", choices=["minilm", "hashing"])
+    t.add_argument("--method", default="aps", choices=["aps", "lac"])
     t.add_argument("--risk", type=float, default=0.1, help="conformal alpha")
     t.add_argument("--calibrate-frac", type=float, default=0.25)
     t.add_argument("--seed", type=int, default=0)

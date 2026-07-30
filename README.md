@@ -35,23 +35,28 @@ wrong behaviour. tinyintent is built around *declining*:
 ## Benchmark
 
 CLINC150, 20-shot, 130 in-scope intents with 20 intents **held out entirely
-as out-of-scope** (unseen at training — the hard, near-OOS case). Frozen
-`all-MiniLM-L6-v2`.
+as out-of-scope** (unseen — the hard, near-OOS case), with a slice of those
+used as calibration negatives. Frozen `all-MiniLM-L6-v2`. Reproduce with
+`uv run python scripts/benchmark.py --method {aps,lac}`.
 
-| risk `a` | coverage | fire rate | fire acc | ambiguous | abstain | OOS false-fire | OOS abstain |
-|---:|---:|---:|---:|---:|---:|---:|---:|
-| 0.05 | 0.95 | 0.23 | 0.96 | 0.74 | 0.03 | 0.23 | 0.28 |
-| 0.10 | 0.91 | 0.40 | 0.96 | 0.53 | 0.07 | 0.32 | 0.42 |
-| 0.20 | 0.79 | 0.55 | 0.97 | 0.27 | 0.19 | 0.27 | 0.69 |
+Two decision policies, two operating profiles:
 
-Read it as: **coverage tracks `1 - a`** (the guarantee holds), and a fired
-single intent is right **~96%** of the time. The cost is ambiguity — with
-130 close intents many sets hold 2+ candidates, which is the safe failure
-mode (escalate, don't misfire). Reproduce with
-`uv run python scripts/benchmark.py`.
+| policy | coverage | fire rate | fire acc | ambiguous | OOS false-fire |
+|---|---:|---:|---:|---:|---:|
+| **APS** (default, risk 0.2) | 0.77 | 0.21 | **1.00** | 0.56 | **0.01** |
+| **LAC + floor** | 0.75 | **0.57** | 0.97 | **0.20** | 0.24 |
 
-Note: "OOS" here is held-out *real* intents, the hardest kind. Far
-out-of-scope input (chit-chat) abstains far more reliably.
+Read it as a trade, not a winner:
+
+- **APS is safety-first.** It almost never fires the wrong intent (OOS
+  false-fire ~0, fire accuracy ~100%) because it turns uncertain or
+  out-of-scope inputs into *ambiguous* rather than a confident guess. The
+  price is decisiveness — it fires less and escalates more.
+- **LAC + floor is decisive.** It resolves most inputs itself (57% fire),
+  at the cost of more near-OOS false fires (24%).
+
+Pick by the cost of a wrong workflow versus the cost of escalating. Default
+is APS. Coverage tracks the conformal target in both.
 
 ## Install
 
@@ -121,8 +126,12 @@ firing. Few-shot is fine (10–20 per intent).
 - **Scorer** (`scorer.py`) — each intent is its set of example vectors; a
   query's score for an intent is the max cosine similarity to them
   (absolute, so out-of-scope stays low; multi-modal intents stay intact).
-- **Conformal** (`conformal.py`) — split-conformal (LAC): the threshold
-  `1 - q` is calibrated so in-scope coverage is at least `1 - a`.
+- **Decision policy** — two options, both giving `1 - a` coverage:
+  - **APS** (`aps.py`, default) — two stage: an absolute-similarity *gate*
+    rejects out-of-scope before any softmax, then Adaptive Prediction Sets
+    build the set over temperature-scaled probabilities. Safety-first.
+  - **LAC** (`conformal.py`) — a single absolute-similarity threshold
+    `1 - q`. Simpler and more decisive.
 - **Model** (`model.py`) — ties them together, turns set size into a
   decision, and attaches the nearest exemplar as an explanation.
 
@@ -138,9 +147,12 @@ firing. Few-shot is fine (10–20 per intent).
   default). On the benchmark this lifted OOS abstention from 0.42 to 0.73
   and cut ambiguity, trading some in-scope coverage — a knob worth having
   when false firing is costly.
-- **`mondrian=True`** calibrates a threshold per intent. It only helps with
-  plenty of calibration data per class; at few-shot it inflates sets, so it
-  is off by default.
+- **`method`** picks the profile: `aps` (default, safety-first — rarely
+  misfires, escalates more) or `lac` (decisive — fires more, misfires more
+  on near-OOS). See the benchmark.
+- **`mondrian=True`** (LAC only) calibrates a threshold per intent. It helps
+  only with plenty of calibration data per class; at few-shot it inflates
+  sets, so it is off by default.
 
 ## Encoders
 

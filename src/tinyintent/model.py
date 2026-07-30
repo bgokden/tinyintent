@@ -6,6 +6,7 @@ from pathlib import Path
 
 import numpy as np
 
+from tinyintent.aps import Aps
 from tinyintent.conformal import Conformal
 from tinyintent.data import OOS_LABEL, Example, labels_of, split
 from tinyintent.encoder import Encoder, SentenceEncoder, make_encoder
@@ -46,7 +47,7 @@ class IntentModel:
         self.encoder = encoder
         self.scorer = scorer
         self.label_names = label_names
-        self.conformal: Conformal | None = None
+        self.policy: Conformal | Aps | None = None
         self._train_texts: list[str] = []
 
     # -- training -----------------------------------------------------------
@@ -75,19 +76,20 @@ class IntentModel:
         examples: list[Example],
         encoder: Encoder | None = None,
         risk: float = 0.1,
+        method: str = "aps",
         calibrate_frac: float = 0.25,
         seed: int = 0,
     ) -> "IntentModel":
         """Fit and calibrate in one call using an internal held-out split.
 
-        Conformal calibration must not reuse the fitted exemplars (they
-        self-match at similarity 1.0 and collapse the threshold), so this
-        splits ``examples`` stratified by label before fitting.
+        Calibration must not reuse the fitted exemplars (they self-match at
+        similarity 1.0 and collapse the threshold), so this splits
+        ``examples`` stratified by label before fitting.
         """
 
         fit_set, cal_set = split(examples, test_frac=calibrate_frac, seed=seed)
         model = cls.fit(fit_set, encoder=encoder)
-        model.calibrate(cal_set, risk=risk)
+        model.calibrate(cal_set, risk=risk, method=method)
         return model
 
     # -- calibration --------------------------------------------------------
@@ -96,16 +98,18 @@ class IntentModel:
         self,
         examples: list[Example],
         risk: float = 0.1,
+        method: str = "aps",
         mondrian: bool = False,
         use_oos: bool = True,
-    ) -> Conformal:
-        """Fit the conformal similarity threshold at the given risk.
+    ) -> Conformal | Aps:
+        """Calibrate the decision policy at the given risk.
 
         ``risk`` (alpha) is the allowed chance of dropping the true intent
-        from the set on in-scope data. Lower risk -> larger sets (more
-        abstain/ambiguous); higher risk -> more single-intent fires. If the
-        calibration data contains ``oos`` examples and ``use_oos`` is set,
-        they raise an abstain floor to reduce false firing on novel input.
+        from the set on in-scope data. ``method`` is ``aps`` (two-stage
+        gate + adaptive sets; smaller sets on close intents) or ``lac``
+        (a single absolute-similarity threshold). If the calibration data
+        contains ``oos`` examples and ``use_oos`` is set, they raise the
+        abstain bar to reduce false firing on novel input.
         """
 
         index = {label: i for i, label in enumerate(self.label_names)}
@@ -122,10 +126,15 @@ class IntentModel:
                     self.encoder.encode([ex.text for ex in oos])
                 )
 
-        self.conformal = Conformal.calibrate(
-            scores, y, alpha=risk, mondrian=mondrian, oos_scores=oos_scores
-        )
-        return self.conformal
+        if method == "aps":
+            self.policy = Aps.calibrate(scores, y, alpha=risk, oos_scores=oos_scores)
+        elif method == "lac":
+            self.policy = Conformal.calibrate(
+                scores, y, alpha=risk, mondrian=mondrian, oos_scores=oos_scores
+            )
+        else:
+            raise ValueError(f"unknown method: {method} (choose aps or lac)")
+        return self.policy
 
     # -- inference ----------------------------------------------------------
 
@@ -143,10 +152,10 @@ class IntentModel:
             top_idx = int(order[0])
             top = (self.label_names[top_idx], float(p[top_idx]))
 
-            if self.conformal is None:
+            if self.policy is None:
                 members = [top_idx]                     # uncalibrated: fire top-1
             else:
-                mask = self.conformal.prediction_set(p[None, :])[0]
+                mask = self.policy.prediction_set(p[None, :])[0]
                 members = [int(i) for i in order if mask[i]]
 
             set_ = [(self.label_names[i], float(p[i])) for i in members]
@@ -176,8 +185,8 @@ class IntentModel:
         directory = Path(directory)
         directory.mkdir(parents=True, exist_ok=True)
         self.scorer.save(directory / "scorer")
-        if self.conformal is not None:
-            self.conformal.save(directory / "conformal")
+        if self.policy is not None:
+            self.policy.save(directory / "policy")
         (directory / "texts.json").write_text(
             json.dumps(self._train_texts), encoding="utf-8"
         )
@@ -186,7 +195,7 @@ class IntentModel:
                 {
                     "encoder": self.encoder.spec(),
                     "label_names": self.label_names,
-                    "has_conformal": self.conformal is not None,
+                    "policy": self.policy.name if self.policy is not None else None,
                 }
             ),
             encoding="utf-8",
@@ -202,8 +211,11 @@ class IntentModel:
             ExemplarScorer.load(directory / "scorer"),
             config["label_names"],
         )
-        if config.get("has_conformal"):
-            model.conformal = Conformal.load(directory / "conformal")
+        policy_name = config.get("policy")
+        if policy_name == "lac":
+            model.policy = Conformal.load(directory / "policy")
+        elif policy_name == "aps":
+            model.policy = Aps.load(directory / "policy")
         model._train_texts = json.loads(
             (directory / "texts.json").read_text(encoding="utf-8")
         )

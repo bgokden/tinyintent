@@ -35,6 +35,8 @@ class Conformal:
     that is similar to nothing yields an empty set.
     """
 
+    name = "lac"
+
     alpha: float
     q: float                       # global fallback
     q_by_class: dict[int, float]
