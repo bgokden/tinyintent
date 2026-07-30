@@ -92,21 +92,39 @@ class IntentModel:
 
     # -- calibration --------------------------------------------------------
 
-    def calibrate(self, examples: list[Example], risk: float = 0.1) -> Conformal:
+    def calibrate(
+        self,
+        examples: list[Example],
+        risk: float = 0.1,
+        mondrian: bool = False,
+        use_oos: bool = True,
+    ) -> Conformal:
         """Fit the conformal similarity threshold at the given risk.
 
         ``risk`` (alpha) is the allowed chance of dropping the true intent
         from the set on in-scope data. Lower risk -> larger sets (more
-        abstain/ambiguous); higher risk -> more single-intent fires.
+        abstain/ambiguous); higher risk -> more single-intent fires. If the
+        calibration data contains ``oos`` examples and ``use_oos`` is set,
+        they raise an abstain floor to reduce false firing on novel input.
         """
 
         index = {label: i for i, label in enumerate(self.label_names)}
         in_scope = [ex for ex in examples if ex.label != OOS_LABEL]
         vectors = self.encoder.encode([ex.text for ex in in_scope])
         y = np.array([index[ex.label] for ex in in_scope], dtype=np.int64)
-
         scores = self.scorer.scores(vectors)
-        self.conformal = Conformal.calibrate(scores, y, alpha=risk)
+
+        oos_scores = None
+        if use_oos:
+            oos = [ex for ex in examples if ex.label == OOS_LABEL]
+            if oos:
+                oos_scores = self.scorer.scores(
+                    self.encoder.encode([ex.text for ex in oos])
+                )
+
+        self.conformal = Conformal.calibrate(
+            scores, y, alpha=risk, mondrian=mondrian, oos_scores=oos_scores
+        )
         return self.conformal
 
     # -- inference ----------------------------------------------------------

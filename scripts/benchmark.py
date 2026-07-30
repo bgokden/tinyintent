@@ -38,7 +38,10 @@ def build_splits(shots: int, n_oos: int, seed: int):
         cal += [Example(t, label) for t in texts[shots:shots + 20]]
         test += [Example(t, label) for t in texts[shots + 20:shots + 40]]
     for label in oos_labels:
-        test += [Example(t, "oos") for t in by_label[label][:20]]
+        # Split each held-out intent: some examples as OOS negatives for
+        # calibration (the abstain floor), the rest as OOS at test time.
+        cal += [Example(t, "oos") for t in by_label[label][:10]]
+        test += [Example(t, "oos") for t in by_label[label][10:30]]
 
     return fit, cal, test, len(in_scope), len(oos_labels)
 

@@ -12,3 +12,6 @@ wheels/
 # Trained model artifacts
 model/
 *.tinyintent/
+
+# Local design notes (kept out of the repo on purpose)
+notes/

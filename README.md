@@ -133,6 +133,24 @@ firing. Few-shot is fine (10–20 per intent).
 - **More shots or more separable intents** shrink sets and reduce
   ambiguity. If two intents are near-duplicates, expect ambiguity — that is
   the model correctly refusing to guess.
+- **Provide negatives.** Put `oos` examples in the calibration data and they
+  raise an absolute abstain floor (`calibrate(..., use_oos=True)`, on by
+  default). On the benchmark this lifted OOS abstention from 0.42 to 0.73
+  and cut ambiguity, trading some in-scope coverage — a knob worth having
+  when false firing is costly.
+- **`mondrian=True`** calibrates a threshold per intent. It only helps with
+  plenty of calibration data per class; at few-shot it inflates sets, so it
+  is off by default.
+
+## Encoders
+
+Default: `all-MiniLM-L6-v2` (sentence-transformers). Alternatives via the
+pluggable `Encoder` protocol:
+
+- `StaticEncoder` — Model2Vec static embeddings, **numpy-only, no torch**,
+  for the smallest footprint (`uv sync --extra static`). Faster and tiny,
+  but weaker on phrasing/negation.
+- `HashingEncoder` — dependency-free stub used in tests.
 
 ## Layout
 

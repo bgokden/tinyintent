@@ -52,6 +52,32 @@ class SentenceEncoder:
         return {"kind": "sentence-transformers", "model": self.model_name}
 
 
+class StaticEncoder:
+    """Static (distilled) embeddings via Model2Vec: numpy-only, no torch.
+
+    A real portability tier: a lookup-table encoder that runs in
+    milliseconds on CPU with a tiny footprint, at some cost to accuracy on
+    phrasing/negation-sensitive inputs. Install the extra with
+    ``uv sync --extra static``.
+    """
+
+    DEFAULT = "minishlab/potion-base-8M"
+
+    def __init__(self, model_name: str = DEFAULT):
+        from model2vec import StaticModel
+
+        self.model_name = model_name
+        self._model = StaticModel.from_pretrained(model_name)
+        self.dim = int(self._model.encode(["x"]).shape[1])
+
+    def encode(self, texts: list[str]) -> np.ndarray:
+        vectors = np.asarray(self._model.encode(list(texts)), dtype=np.float32)
+        return _l2_normalize(vectors)
+
+    def spec(self) -> dict:
+        return {"kind": "static", "model": self.model_name}
+
+
 class HashingEncoder:
     """Deterministic, dependency-free bag-of-words hashing encoder.
 
@@ -84,6 +110,8 @@ def make_encoder(spec: dict) -> Encoder:
     kind = spec["kind"]
     if kind == "sentence-transformers":
         return SentenceEncoder(spec.get("model", DEFAULT_MODEL))
+    if kind == "static":
+        return StaticEncoder(spec.get("model", StaticEncoder.DEFAULT))
     if kind == "hashing":
         return HashingEncoder(int(spec.get("dim", 256)))
     raise ValueError(f"unknown encoder kind: {kind}")

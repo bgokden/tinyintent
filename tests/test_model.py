@@ -59,6 +59,18 @@ def test_conformal_coverage_holds():
     assert report.oos_false_fire <= 0.15
 
 
+def test_oos_floor_raises_with_negatives():
+    from tinyintent import split
+
+    data = make_data(n=14)
+    fit_set, cal_set = split(data, test_frac=0.4, seed=0)   # cal keeps some oos
+    model = IntentModel.fit(fit_set, encoder=HashingEncoder(dim=1024))
+    model.calibrate(cal_set, risk=0.1, use_oos=True)
+
+    assert model.conformal.floor > -1.0                     # negatives lifted the floor
+    assert model.predict("alpha alpha request item").intent == "a"  # in-scope still fires
+
+
 def test_save_load_roundtrip(tmp_path):
     model, _ = make_model()
     before = model.predict("beta beta request item")

@@ -13,6 +13,11 @@ dependencies = [
 [project.scripts]
 tinyintent = "tinyintent.cli:main"
 
+[project.optional-dependencies]
+static = [
+    "model2vec>=0.8.2",
+]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
