@@ -3,37 +3,13 @@ from __future__ import annotations
 import argparse
 
 from tinyintent.data import load_jsonl
-from tinyintent.encoder import HashingEncoder, SentenceEncoder
 from tinyintent.model import IntentModel
-
-
-def _make_encoder(name: str):
-    if name == "minilm":
-        return SentenceEncoder()
-    if name == "hashing":
-        return HashingEncoder()
-    raise SystemExit(f"unknown encoder: {name} (choose minilm or hashing)")
 
 
 def cmd_train(args: argparse.Namespace) -> None:
     data = load_jsonl(args.data)
-
-    if args.finetune:
-        from tinyintent.finetune import finetune_encoder
-        from tinyintent.encoder import DEFAULT_MODEL
-
-        encoder = finetune_encoder(
-            data, out_dir=f"{args.out}/encoder", base_model=DEFAULT_MODEL, epochs=args.epochs
-        )
-    else:
-        encoder = _make_encoder(args.encoder)
-
-    model = IntentModel.fit(data, encoder=encoder, classifier=args.classifier)
-    print(f"Trained on {len(data)} examples, {len(model.label_names)} intents "
-          f"(classifier={args.classifier})")
-    if args.rerank:
-        model.fit_reranker(epochs=args.rerank_epochs)
-        print(f"Trained cross-encoder reranker (epochs={args.rerank_epochs})")
+    model = IntentModel.fit(data)
+    print(f"Trained on {len(data)} examples, {len(model.label_names)} intents")
     model.save(args.out)
     print(f"Saved model to {args.out}")
 
@@ -80,13 +56,6 @@ def build_parser() -> argparse.ArgumentParser:
     t = sub.add_parser("train", help="train an intent model")
     t.add_argument("--data", required=True)
     t.add_argument("--out", required=True)
-    t.add_argument("--encoder", default="minilm", choices=["minilm", "hashing"])
-    t.add_argument("--classifier", default="linear", choices=["linear", "exemplar"])
-    t.add_argument("--finetune", action="store_true", help="contrastively fine-tune the encoder")
-    t.add_argument("--epochs", type=int, default=1, help="fine-tune epochs (with --finetune)")
-    t.add_argument("--rerank", action="store_true",
-                   help="train a cross-encoder reranker (precise second stage)")
-    t.add_argument("--rerank-epochs", type=int, default=3, help="reranker training epochs")
     t.set_defaults(func=cmd_train)
 
     e = sub.add_parser("evaluate", help="evaluate a saved model on a dataset")

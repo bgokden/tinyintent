@@ -1,15 +1,15 @@
 # tinyintent
 
-A small, portable intent classifier. tinyintent embeds a few labelled
-utterances per intent with a frozen sentence encoder and fits a linear head on
-top, producing a model that maps text to the single best intent on CPU, with
-no LLM in the loop and no training step.
+A small, portable intent classifier. Give it a few labelled utterances per
+intent; it maps text to the single best intent on CPU, with no LLM in the loop.
+One opinionated pipeline, no knobs to turn.
 
 ```
 utterance
   -> frozen sentence encoder (bge-large)
-  -> linear classifier head
-  -> top-1 intent
+  -> linear classifier head        (top-k candidates)
+  -> trained cross-encoder reranker (picks the best)
+  -> intent
 ```
 
 ## Install
@@ -41,7 +41,7 @@ uv run tinyintent evaluate --model model --data intents.jsonl
 from tinyintent import IntentModel, load_jsonl
 
 data = load_jsonl("intents.jsonl")
-model = IntentModel.fit(data)          # frozen encoder + linear head, no training
+model = IntentModel.fit(data)          # trains the whole pipeline
 model.save("model")
 
 print(model.classify("I want my money back for order 883"))   # refund
@@ -52,78 +52,33 @@ print(pred.ranking[:3])             # ranked intents
 print(pred.explanation)             # nearest labelled example
 ```
 
+## How it works
+
+`IntentModel.fit(data)` trains three parts, and `classify`/`predict` run them
+in order. There are no options — this is the configuration that measured best.
+
+- **Encoder** — a frozen `bge-large` sentence encoder. It won an encoder sweep
+  on the intent benchmarks; nothing smaller matched it and fine-tuning it did
+  not help.
+- **Linear head** — a logistic-regression classifier over the embeddings. It
+  beats nearest-exemplar for top-1 accuracy and produces the top-k candidates.
+- **Cross-encoder reranker** — a cross-encoder *trained on your data* (same-
+  intent vs different-intent pairs, with hard negatives) reads each candidate
+  together with the query and re-ranks them, ensembled with the head's scores.
+  Off-the-shelf cross-encoders hurt; the win comes from training it on your
+  intents, which is why it is always trained, never bundled pretrained.
+
 ## Accuracy
 
-Top-1 accuracy, frozen encoder + linear head, few-shot, averaged over seeds:
+Top-1 accuracy, few-shot (20 examples/intent), averaged over seeds:
 
-| dataset | bge-small (portable) | bge-large (default) |
-|---|---:|---:|
-| CLINC150, 20-shot | 0.96 | 0.97 |
-| Banking77, 20-shot | 0.90 | 0.91 |
-
-`bge-large` is the default for best accuracy; `bge-small` is ~10x lighter for
-a point less. Swap the base with `IntentModel.fit(data, encoder=...)`:
-
-```python
-from tinyintent import IntentModel, SentenceEncoder
-model = IntentModel.fit(data, encoder=SentenceEncoder("BAAI/bge-small-en-v1.5"))
-```
-
-Reproduce with `uv run python scripts/benchmark.py --dataset banking`.
-
-## Fine-tuning (optional)
-
-Fine-tuning contrastively specializes the encoder
-(`MultipleNegativesRankingLoss` over same-intent pairs, the SetFit body
-recipe). It is **optional and situational**: it adds about a point on a
-smaller base at low shot counts, and only a marginal gain on `bge-large`,
-which has little headroom left frozen.
-
-| setup | Banking77, 20-shot |
+| dataset | accuracy |
 |---|---:|
-| bge-small, frozen | 0.895 |
-| bge-small, fine-tuned (lr 2e-5) | 0.905 |
-| bge-large, frozen | 0.909 |
-| bge-large, fine-tuned (lr 1e-6) | 0.913 |
+| CLINC150 | 0.97 |
+| Banking77 | 0.92 |
 
-The learning rate must scale down with the base: 2e-5 suits `bge-small`, but a
-335M encoder like `bge-large` needs roughly `1e-6` — the default 2e-5 slightly
-*degrades* it. So reach for fine-tuning mainly when you need a small, portable
-base *and* the extra point:
-
-```bash
-uv sync --extra train
-uv run tinyintent train --data intents.jsonl --out model --finetune --epochs 1
-# larger base: pass a lower LR via finetune_encoder(..., learning_rate=1e-6)
-```
-
-`--epochs` controls the passes (one is usually best; more overfits the pair
-set). Fine-tuning needs a training step (a minute or two on a GPU). Note that
-ModernBERT-based encoders collapse under this recipe at 2e-5 (they need a far
-lower LR just to match their frozen accuracy), so they are best used frozen.
-
-## Reranking (optional)
-
-A precise second stage for when you want the extra accuracy and can pay k× the
-compute per query. Stage 1 (encoder + linear head) proposes the top-k intents;
-a **cross-encoder trained on your data** then reads (query, candidate-exemplar)
-pairs together and re-ranks them, ensembled with the stage-1 scores. This is
-the part where training pays off: an off-the-shelf cross-encoder *hurts* (it
-does not encode "same intent"), so the reranker is always fine-tuned on your
-labelled pairs, with hard negatives mined from confusable intents.
-
-```bash
-uv run tinyintent train --data intents.jsonl --out model --rerank
-uv run tinyintent predict --model model "cancel my order"      # uses it automatically
-# Python: model = IntentModel.fit(data); model.fit_reranker(); model.save("model")
-```
-
-It lifts Banking77 20-shot from 0.909 to 0.918 (+~1pt), and more where there is
-more data (50-shot: 0.929 → 0.936). The gain is bounded: a strong stage-1
-encoder already resolves most cases, so reranking is a modest, situational win
-— enable it when every point matters and the per-query cost of running a
-cross-encoder over the top-k candidates is acceptable. It needs a training step
-but runs on the base install (no extra needed).
+Banking77's intents overlap heavily, so it is the harder ceiling; CLINC150 is
+near-saturated. Reproduce with `uv run python scripts/benchmark.py`.
 
 ## Data format
 
@@ -136,41 +91,20 @@ are ignored during training and evaluation.
 {"text": "what's the weather", "label": "oos"}
 ```
 
-## API
-
-- `IntentModel.fit(examples, encoder=None, classifier="linear")` — fit the head on frozen embeddings
-- `model.classify(text)` / `classify_batch(texts)` — the top-1 intent label(s)
-- `model.predict(text)` — `Prediction(intent, score, ranking, explanation)`
-- `model.evaluate(examples)` — top-1 accuracy report
-- `model.save(dir)` / `IntentModel.load(dir)` — persist and reload
-- `model.fit_reranker(base_model=..., k=5, beta=0.5, epochs=3, ...)` — train the optional cross-encoder reranker
-- `finetune_encoder(examples, out_dir, base_model=..., epochs=1, ...)` — optional encoder fine-tune
-
-## How it works
-
-- **Encoder** (`encoder.py`) — a frozen `SentenceTransformer` (`bge-large`
-  base). Pluggable via the `Encoder` protocol; `bge-small`, static
-  (Model2Vec), and a dependency-free hashing encoder are included.
-- **Scorer** (`scorer.py`) — a logistic-regression head over the embeddings,
-  stored as plain arrays so the model artifact stays portable.
-- **Model** (`model.py`) — fits the head, returns the top-1 intent with a
-  ranking, and attaches the nearest labelled example as an explanation.
-
 ## Layout
 
 ```
 src/tinyintent/
     data.py       Example, jsonl / few-shot loaders, stratified split
-    encoder.py    Encoder protocol, SentenceEncoder, StaticEncoder, HashingEncoder
-    scorer.py     LinearScorer (default), ExemplarScorer
-    reranker.py   optional trained cross-encoder reranking tier
-    finetune.py   optional contrastive encoder fine-tune
+    encoder.py    frozen bge-large encoder (hashing stub for offline tests)
+    scorer.py     linear classifier head
+    reranker.py   trained cross-encoder reranker
     model.py      IntentModel: fit / classify / predict / evaluate / save / load
     metrics.py    top-1 accuracy report
     explain.py    nearest labelled example
     cli.py        train / predict / evaluate
 examples/         commerce intents
-scripts/          benchmark.py, experiments.py
+scripts/          benchmark.py
 tests/            offline tests (hashing encoder)
 ```
 

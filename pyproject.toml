@@ -1,7 +1,7 @@
 [project]
 name = "tinyintent"
 version = "0.1.0"
-description = "A small, portable intent-detection training framework: frozen embeddings, pluggable heads, abstention, and explanations"
+description = "A small, portable intent classifier: frozen bge-large embeddings, a linear head, and a trained cross-encoder reranker"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -12,15 +12,6 @@ dependencies = [
 
 [project.scripts]
 tinyintent = "tinyintent.cli:main"
-
-[project.optional-dependencies]
-static = [
-    "model2vec>=0.8.2",
-]
-train = [
-    "accelerate>=1.1.0",
-    "datasets>=5.0.1",
-]
 
 [build-system]
 requires = ["hatchling"]

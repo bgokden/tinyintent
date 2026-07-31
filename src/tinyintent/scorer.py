@@ -6,85 +6,13 @@ from pathlib import Path
 import numpy as np
 
 
-def make_scorer(name: str):
-    scorers = {"exemplar": ExemplarScorer, "linear": LinearScorer}
-    if name not in scorers:
-        raise ValueError(f"unknown classifier: {name} (choose {sorted(scorers)})")
-    return scorers[name]()
-
-
-def load_scorer(name: str, directory: str | Path):
-    return {"exemplar": ExemplarScorer, "linear": LinearScorer}[name].load(directory)
-
-
-class ExemplarScorer:
-    """The single scoring method: per-class maximum cosine similarity.
-
-    Each class is represented by its example vectors (not a single
-    centroid), so multi-modal intents stay intact. A query's score for a
-    class is the largest cosine similarity to any of that class's
-    exemplars. Simple and dependency-free, but the linear head is stronger
-    for pure top-1 accuracy (see :class:`LinearScorer`).
-    """
-
-    name = "exemplar"
-
-    def __init__(self) -> None:
-        self.vectors: np.ndarray | None = None       # [E, D] unit rows
-        self.exemplar_label: np.ndarray | None = None  # [E]
-        self.n_labels = 0
-
-    def fit(self, vectors: np.ndarray, y: np.ndarray, n_labels: int) -> None:
-        self.vectors = vectors.astype(np.float32)
-        self.exemplar_label = y.astype(np.int64)
-        self.n_labels = n_labels
-
-    def scores(self, vectors: np.ndarray) -> np.ndarray:
-        """Per-class max cosine similarity, shape [n, n_labels], in [-1, 1]."""
-
-        sims = vectors.astype(np.float32) @ self.vectors.T   # [n, E]
-        out = np.full((vectors.shape[0], self.n_labels), -1.0, dtype=np.float32)
-        for label in range(self.n_labels):
-            mask = self.exemplar_label == label
-            if mask.any():
-                out[:, label] = sims[:, mask].max(axis=1)
-        return out
-
-    def save(self, directory: str | Path) -> None:
-        directory = Path(directory)
-        directory.mkdir(parents=True, exist_ok=True)
-        np.savez(
-            directory / "scorer.npz",
-            vectors=self.vectors,
-            exemplar_label=self.exemplar_label,
-        )
-        (directory / "scorer.json").write_text(
-            json.dumps({"n_labels": self.n_labels}), encoding="utf-8"
-        )
-
-    @classmethod
-    def load(cls, directory: str | Path) -> "ExemplarScorer":
-        directory = Path(directory)
-        config = json.loads((directory / "scorer.json").read_text(encoding="utf-8"))
-        data = np.load(directory / "scorer.npz")
-        scorer = cls()
-        scorer.vectors = data["vectors"].astype(np.float32)
-        scorer.exemplar_label = data["exemplar_label"].astype(np.int64)
-        scorer.n_labels = int(config["n_labels"])
-        return scorer
-
-
 class LinearScorer:
-    """Logistic-regression classifier over the embeddings.
+    """Logistic-regression head over the frozen embeddings.
 
-    The strongest head for pure top-1 accuracy: on frozen embeddings it
-    clearly beats nearest-exemplar (e.g. CLINC .92 -> .96), because it
-    learns a decision boundary rather than trusting the single closest
-    example. Use it when the goal is "always decide the best intent".
+    The single classifier head: it learns a decision boundary rather than
+    trusting the nearest example, which is what wins for top-1 accuracy.
     Weights are stored as plain arrays, so the artifact stays portable.
     """
-
-    name = "linear"
 
     def __init__(self, C: float = 10.0, max_iter: int = 1000) -> None:
         self.C = C
@@ -107,9 +35,7 @@ class LinearScorer:
         return out
 
     def save(self, directory: str | Path) -> None:
-        from pathlib import Path as _Path
-
-        directory = _Path(directory)
+        directory = Path(directory)
         directory.mkdir(parents=True, exist_ok=True)
         np.savez(
             directory / "scorer.npz",

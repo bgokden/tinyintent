@@ -6,11 +6,8 @@ from typing import Protocol
 import numpy as np
 
 
-# bge-large is the default base: best top-1 accuracy in the encoder sweep and it
-# fine-tunes reliably with the contrastive recipe (unlike ModernBERT-based
-# encoders, which are strong frozen but degrade under fine-tuning). bge-small is
-# the lighter, portable alternative; gte-modernbert-base is a strong frozen-only
-# option.
+# bge-large is the base: best top-1 accuracy in the encoder sweep, and it
+# fine-tunes reliably for the reranker's cross-encoder pairs.
 DEFAULT_MODEL = "BAAI/bge-large-en-v1.5"
 
 
@@ -31,7 +28,7 @@ class Encoder(Protocol):
 
 
 class SentenceEncoder:
-    """Frozen sentence-transformers encoder (default: MiniLM)."""
+    """Frozen sentence-transformers encoder (bge-large)."""
 
     def __init__(self, model_name: str = DEFAULT_MODEL, device: str | None = None):
         from sentence_transformers import SentenceTransformer
@@ -57,39 +54,11 @@ class SentenceEncoder:
         return {"kind": "sentence-transformers", "model": self.model_name}
 
 
-class StaticEncoder:
-    """Static (distilled) embeddings via Model2Vec: numpy-only, no torch.
-
-    A real portability tier: a lookup-table encoder that runs in
-    milliseconds on CPU with a tiny footprint, at some cost to accuracy on
-    phrasing/negation-sensitive inputs. Install the extra with
-    ``uv sync --extra static``.
-    """
-
-    DEFAULT = "minishlab/potion-base-8M"
-
-    def __init__(self, model_name: str = DEFAULT):
-        from model2vec import StaticModel
-
-        self.model_name = model_name
-        self._model = StaticModel.from_pretrained(model_name)
-        self.dim = int(self._model.encode(["x"]).shape[1])
-
-    def encode(self, texts: list[str]) -> np.ndarray:
-        vectors = np.asarray(self._model.encode(list(texts)), dtype=np.float32)
-        return _l2_normalize(vectors)
-
-    def spec(self) -> dict:
-        return {"kind": "static", "model": self.model_name}
-
-
 class HashingEncoder:
     """Deterministic, dependency-free bag-of-words hashing encoder.
 
-    Not semantically strong, but offline and instant. It exists so the
-    framework and tests can run without downloading a model; it also
-    doubles as a portability floor for trivially simple, keyword-separable
-    intents.
+    Not semantically strong; it exists so the framework and tests can run
+    offline without downloading a model.
     """
 
     def __init__(self, dim: int = 256):
@@ -110,13 +79,11 @@ class HashingEncoder:
 
 
 def make_encoder(spec: dict) -> Encoder:
-    """Rebuild an encoder from its spec dict."""
+    """Rebuild an encoder from its saved spec."""
 
     kind = spec["kind"]
     if kind == "sentence-transformers":
         return SentenceEncoder(spec.get("model", DEFAULT_MODEL))
-    if kind == "static":
-        return StaticEncoder(spec.get("model", StaticEncoder.DEFAULT))
     if kind == "hashing":
         return HashingEncoder(int(spec.get("dim", 256)))
     raise ValueError(f"unknown encoder kind: {kind}")

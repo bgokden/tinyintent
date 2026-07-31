@@ -10,8 +10,8 @@ from tinyintent.data import OOS_LABEL, Example, labels_of
 from tinyintent.encoder import Encoder, SentenceEncoder, make_encoder
 from tinyintent.explain import nearest_example
 from tinyintent.metrics import Report, score_predictions
-from tinyintent.reranker import DEFAULT_CE_MODEL, CrossEncoderReranker
-from tinyintent.scorer import ExemplarScorer, load_scorer, make_scorer
+from tinyintent.reranker import CrossEncoderReranker
+from tinyintent.scorer import LinearScorer
 
 
 @dataclass
@@ -19,8 +19,8 @@ class Prediction:
     """The outcome of classifying one utterance.
 
     ``intent`` is the single best intent (the model always decides).
-    ``score`` is that intent's score, ``ranking`` lists every intent by
-    score descending, and ``explanation`` is the nearest labelled example.
+    ``score`` is the stage-1 probability of that intent, ``ranking`` lists
+    every intent by rank, and ``explanation`` is the nearest labelled example.
     """
 
     intent: str
@@ -30,16 +30,15 @@ class Prediction:
 
 
 class IntentModel:
-    """A small, portable top-1 intent classifier.
+    """A portable top-1 intent classifier.
 
-    Frozen-encoder embeddings scored by a light classifier head (linear by
-    default, or nearest-exemplar), returning the single best intent for
-    every input. Train with :meth:`fit`, then :meth:`classify` or
-    :meth:`predict`. Out-of-scope examples (label ``oos``) are never a
-    class; they are ignored at fit time.
+    One opinionated pipeline: frozen ``bge-large`` embeddings, a linear head,
+    and a trained cross-encoder reranker. Train with :meth:`fit`, then
+    :meth:`classify` or :meth:`predict`. Out-of-scope examples (label ``oos``)
+    are ignored at fit time.
     """
 
-    def __init__(self, encoder: Encoder, scorer: ExemplarScorer, label_names: list[str]):
+    def __init__(self, encoder: Encoder, scorer: LinearScorer, label_names: list[str]):
         self.encoder = encoder
         self.scorer = scorer
         self.label_names = label_names
@@ -54,13 +53,9 @@ class IntentModel:
     # -- training -----------------------------------------------------------
 
     @classmethod
-    def fit(
-        cls,
-        examples: list[Example],
-        encoder: Encoder | None = None,
-        classifier: str = "linear",
-    ) -> "IntentModel":
-        encoder = encoder or SentenceEncoder()
+    def _fit_base(cls, examples: list[Example], encoder: Encoder) -> "IntentModel":
+        """Stage 1 only (encoder + linear head). Internal; no reranker."""
+
         label_names = labels_of(examples, include_oos=False)
         index = {label: i for i, label in enumerate(label_names)}
 
@@ -69,7 +64,7 @@ class IntentModel:
         y = np.array([index[ex.label] for ex in in_scope], dtype=np.int64)
 
         vectors = encoder.encode(texts)
-        scorer = make_scorer(classifier)
+        scorer = LinearScorer()
         scorer.fit(vectors, y, len(label_names))
 
         model = cls(encoder, scorer, label_names)
@@ -78,32 +73,15 @@ class IntentModel:
         model._train_texts = texts
         return model
 
-    # -- reranking (optional second stage) ----------------------------------
+    @classmethod
+    def fit(cls, examples: list[Example]) -> "IntentModel":
+        """Train the full pipeline: bge-large + linear head + reranker."""
 
-    def fit_reranker(
-        self,
-        base_model: str = DEFAULT_CE_MODEL,
-        k: int = 5,
-        beta: float = 0.5,
-        epochs: int = 3,
-        hard_neg: bool = True,
-        near_m: int = 10,
-        seed: int = 0,
-    ) -> CrossEncoderReranker:
-        """Train a cross-encoder reranker on the fitted training data.
-
-        Adds a precise second stage: stage-1 proposes the top-k intents, the
-        cross-encoder re-scores the query against candidate exemplars. Needs a
-        training step; :meth:`fit` must have been called first.
-        """
-
-        if self._train_vectors is None:
-            raise RuntimeError("fit the model before fit_reranker")
-        reranker = CrossEncoderReranker(k=k, beta=beta, base_model=base_model)
-        reranker.fit(self._train_texts, self._train_y, self._train_vectors,
-                     epochs=epochs, hard_neg=hard_neg, near_m=near_m, seed=seed)
-        self.reranker = reranker
-        return reranker
+        model = cls._fit_base(examples, SentenceEncoder())
+        model.reranker = CrossEncoderReranker().fit(
+            model._train_texts, model._train_y, model._train_vectors
+        )
+        return model
 
     # -- inference ----------------------------------------------------------
 
@@ -128,13 +106,12 @@ class IntentModel:
     def predict_batch(self, texts: list[str]) -> list[Prediction]:
         vectors = self._embed(texts)
         stage1 = self.scorer.scores(vectors)
-        rank = self._ranking_scores(texts, stage1)          # ordering (reranked if present)
+        rank = self._ranking_scores(texts, stage1)
         results: list[Prediction] = []
 
         for row in range(len(texts)):
             order = np.argsort(rank[row])[::-1]
             top_idx = int(order[0])
-            # report stage-1 probabilities as the interpretable score, in rerank order
             ranking = [(self.label_names[int(i)], float(stage1[row][i])) for i in order]
             explanation = nearest_example(
                 vectors[row], top_idx,
@@ -178,7 +155,6 @@ class IntentModel:
                 {
                     "encoder": self.encoder.spec(),
                     "label_names": self.label_names,
-                    "classifier": self.scorer.name,
                     "reranker": self.reranker is not None,
                 }
             ),
@@ -192,7 +168,7 @@ class IntentModel:
 
         model = cls(
             make_encoder(config["encoder"]),
-            load_scorer(config.get("classifier", "linear"), directory / "scorer"),
+            LinearScorer.load(directory / "scorer"),
             config["label_names"],
         )
         if config.get("reranker"):
