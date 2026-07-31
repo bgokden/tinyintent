@@ -31,6 +31,9 @@ def cmd_train(args: argparse.Namespace) -> None:
     model = IntentModel.fit(data, encoder=encoder, classifier=args.classifier)
     print(f"Trained on {len(data)} examples, {len(model.label_names)} intents "
           f"(classifier={args.classifier})")
+    if args.rerank:
+        model.fit_reranker(epochs=args.rerank_epochs)
+        print(f"Trained cross-encoder reranker (epochs={args.rerank_epochs})")
     model.save(args.out)
     print(f"Saved model to {args.out}")
 
@@ -81,6 +84,9 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("--classifier", default="linear", choices=["linear", "exemplar"])
     t.add_argument("--finetune", action="store_true", help="contrastively fine-tune the encoder")
     t.add_argument("--epochs", type=int, default=1, help="fine-tune epochs (with --finetune)")
+    t.add_argument("--rerank", action="store_true",
+                   help="train a cross-encoder reranker (precise second stage)")
+    t.add_argument("--rerank-epochs", type=int, default=3, help="reranker training epochs")
     t.set_defaults(func=cmd_train)
 
     e = sub.add_parser("evaluate", help="evaluate a saved model on a dataset")

@@ -102,6 +102,29 @@ set). Fine-tuning needs a training step (a minute or two on a GPU). Note that
 ModernBERT-based encoders collapse under this recipe at 2e-5 (they need a far
 lower LR just to match their frozen accuracy), so they are best used frozen.
 
+## Reranking (optional)
+
+A precise second stage for when you want the extra accuracy and can pay k× the
+compute per query. Stage 1 (encoder + linear head) proposes the top-k intents;
+a **cross-encoder trained on your data** then reads (query, candidate-exemplar)
+pairs together and re-ranks them, ensembled with the stage-1 scores. This is
+the part where training pays off: an off-the-shelf cross-encoder *hurts* (it
+does not encode "same intent"), so the reranker is always fine-tuned on your
+labelled pairs, with hard negatives mined from confusable intents.
+
+```bash
+uv run tinyintent train --data intents.jsonl --out model --rerank
+uv run tinyintent predict --model model "cancel my order"      # uses it automatically
+# Python: model = IntentModel.fit(data); model.fit_reranker(); model.save("model")
+```
+
+It lifts Banking77 20-shot from 0.909 to 0.918 (+~1pt), and more where there is
+more data (50-shot: 0.929 → 0.936). The gain is bounded: a strong stage-1
+encoder already resolves most cases, so reranking is a modest, situational win
+— enable it when every point matters and the per-query cost of running a
+cross-encoder over the top-k candidates is acceptable. It needs a training step
+but runs on the base install (no extra needed).
+
 ## Data format
 
 JSON Lines of `{"text", "label"}`. A handful of examples per intent is enough
@@ -120,6 +143,7 @@ are ignored during training and evaluation.
 - `model.predict(text)` — `Prediction(intent, score, ranking, explanation)`
 - `model.evaluate(examples)` — top-1 accuracy report
 - `model.save(dir)` / `IntentModel.load(dir)` — persist and reload
+- `model.fit_reranker(base_model=..., k=5, beta=0.5, epochs=3, ...)` — train the optional cross-encoder reranker
 - `finetune_encoder(examples, out_dir, base_model=..., epochs=1, ...)` — optional encoder fine-tune
 
 ## How it works
@@ -139,6 +163,7 @@ src/tinyintent/
     data.py       Example, jsonl / few-shot loaders, stratified split
     encoder.py    Encoder protocol, SentenceEncoder, StaticEncoder, HashingEncoder
     scorer.py     LinearScorer (default), ExemplarScorer
+    reranker.py   optional trained cross-encoder reranking tier
     finetune.py   optional contrastive encoder fine-tune
     model.py      IntentModel: fit / classify / predict / evaluate / save / load
     metrics.py    top-1 accuracy report

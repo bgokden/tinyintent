@@ -10,6 +10,7 @@ from tinyintent.data import OOS_LABEL, Example, labels_of
 from tinyintent.encoder import Encoder, SentenceEncoder, make_encoder
 from tinyintent.explain import nearest_example
 from tinyintent.metrics import Report, score_predictions
+from tinyintent.reranker import DEFAULT_CE_MODEL, CrossEncoderReranker
 from tinyintent.scorer import ExemplarScorer, load_scorer, make_scorer
 
 
@@ -42,6 +43,7 @@ class IntentModel:
         self.encoder = encoder
         self.scorer = scorer
         self.label_names = label_names
+        self.reranker: CrossEncoderReranker | None = None
         self._train_vectors: np.ndarray | None = None
         self._train_y: np.ndarray | None = None
         self._train_texts: list[str] = []
@@ -76,7 +78,39 @@ class IntentModel:
         model._train_texts = texts
         return model
 
+    # -- reranking (optional second stage) ----------------------------------
+
+    def fit_reranker(
+        self,
+        base_model: str = DEFAULT_CE_MODEL,
+        k: int = 5,
+        beta: float = 0.5,
+        epochs: int = 3,
+        hard_neg: bool = True,
+        near_m: int = 10,
+        seed: int = 0,
+    ) -> CrossEncoderReranker:
+        """Train a cross-encoder reranker on the fitted training data.
+
+        Adds a precise second stage: stage-1 proposes the top-k intents, the
+        cross-encoder re-scores the query against candidate exemplars. Needs a
+        training step; :meth:`fit` must have been called first.
+        """
+
+        if self._train_vectors is None:
+            raise RuntimeError("fit the model before fit_reranker")
+        reranker = CrossEncoderReranker(k=k, beta=beta, base_model=base_model)
+        reranker.fit(self._train_texts, self._train_y, self._train_vectors,
+                     epochs=epochs, hard_neg=hard_neg, near_m=near_m, seed=seed)
+        self.reranker = reranker
+        return reranker
+
     # -- inference ----------------------------------------------------------
+
+    def _ranking_scores(self, texts: list[str], stage1: np.ndarray) -> np.ndarray:
+        if self.reranker is None:
+            return stage1
+        return self.reranker.rerank_scores(texts, stage1)
 
     def classify(self, text: str) -> str:
         return self.classify_batch([text])[0]
@@ -84,28 +118,31 @@ class IntentModel:
     def classify_batch(self, texts: list[str]) -> list[str]:
         """Return the single best intent for each text."""
 
-        scores = self.scorer.scores(self._embed(texts))
-        return [self.label_names[int(i)] for i in scores.argmax(axis=1)]
+        stage1 = self.scorer.scores(self._embed(texts))
+        ranking = self._ranking_scores(texts, stage1)
+        return [self.label_names[int(i)] for i in ranking.argmax(axis=1)]
 
     def predict(self, text: str) -> Prediction:
         return self.predict_batch([text])[0]
 
     def predict_batch(self, texts: list[str]) -> list[Prediction]:
         vectors = self._embed(texts)
-        scores = self.scorer.scores(vectors)
+        stage1 = self.scorer.scores(vectors)
+        rank = self._ranking_scores(texts, stage1)          # ordering (reranked if present)
         results: list[Prediction] = []
 
         for row in range(len(texts)):
-            p = scores[row]
-            order = np.argsort(p)[::-1]
+            order = np.argsort(rank[row])[::-1]
             top_idx = int(order[0])
-            ranking = [(self.label_names[int(i)], float(p[i])) for i in order]
+            # report stage-1 probabilities as the interpretable score, in rerank order
+            ranking = [(self.label_names[int(i)], float(stage1[row][i])) for i in order]
             explanation = nearest_example(
                 vectors[row], top_idx,
                 self._train_vectors, self._train_y, self._train_texts,
             )
             results.append(
-                Prediction(self.label_names[top_idx], float(p[top_idx]), ranking, explanation)
+                Prediction(self.label_names[top_idx], float(stage1[row][top_idx]),
+                           ranking, explanation)
             )
         return results
 
@@ -130,6 +167,8 @@ class IntentModel:
         directory = Path(directory)
         directory.mkdir(parents=True, exist_ok=True)
         self.scorer.save(directory / "scorer")
+        if self.reranker is not None:
+            self.reranker.save(directory / "reranker")
         np.savez(directory / "train.npz", vectors=self._train_vectors, y=self._train_y)
         (directory / "texts.json").write_text(
             json.dumps(self._train_texts), encoding="utf-8"
@@ -140,6 +179,7 @@ class IntentModel:
                     "encoder": self.encoder.spec(),
                     "label_names": self.label_names,
                     "classifier": self.scorer.name,
+                    "reranker": self.reranker is not None,
                 }
             ),
             encoding="utf-8",
@@ -155,6 +195,9 @@ class IntentModel:
             load_scorer(config.get("classifier", "linear"), directory / "scorer"),
             config["label_names"],
         )
+        if config.get("reranker"):
+            model.reranker = CrossEncoderReranker.load(directory / "reranker")
+
         train = np.load(directory / "train.npz")
         model._train_vectors = train["vectors"].astype(np.float32)
         model._train_y = train["y"].astype(np.int64)

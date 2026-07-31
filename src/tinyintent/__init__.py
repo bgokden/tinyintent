@@ -18,11 +18,13 @@ from tinyintent.encoder import (
 from tinyintent.finetune import finetune_encoder
 from tinyintent.metrics import Report, score_predictions
 from tinyintent.model import IntentModel, Prediction
+from tinyintent.reranker import CrossEncoderReranker
 from tinyintent.scorer import ExemplarScorer, LinearScorer
 
 
 __all__ = [
     "DEFAULT_MODEL",
+    "CrossEncoderReranker",
     "Encoder",
     "Example",
     "ExemplarScorer",
