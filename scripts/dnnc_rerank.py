@@ -32,24 +32,41 @@ def encode(model, texts):
     ).astype(np.float32)
 
 
-def make_pairs(ftx, fy, n_pos, n_neg, seed):
+def _nearest_intents(Xtr, fy, labels, near_m):
+    cent = {}
+    for c in labels:
+        rows = Xtr[fy == c]
+        v = rows.mean(axis=0)
+        cent[c] = v / max(float(np.linalg.norm(v)), 1e-8)
+    near = {}
+    for c in labels:
+        sims = sorted(((c2, float(cent[c] @ cent[c2])) for c2 in labels if c2 != c),
+                      key=lambda x: -x[1])
+        near[c] = [c2 for c2, _ in sims[:near_m]]
+    return near
+
+
+def make_pairs(ftx, fy, Xtr, n_pos, n_neg, hard, near_m, seed):
     rng = random.Random(seed)
     by: dict[int, list[str]] = {}
     for t, y in zip(ftx, fy):
         by.setdefault(int(y), []).append(t)
-    all_labels = list(by)
-    pairs, labels = [], []
+    labels = sorted(by)
+    near = _nearest_intents(Xtr, fy, labels, near_m) if hard else None
+
+    pairs, out = [], []
     for c, texts in by.items():
-        others = [t for lab in all_labels if lab != c for t in by[lab]]
+        neg_labels = near[c] if hard else [lab for lab in labels if lab != c]
+        neg_pool = [t for lab in neg_labels for t in by[lab]]
         for a in texts:
             same = [t for t in texts if t != a]
             for b in rng.sample(same, min(n_pos, len(same))):
                 pairs.append([a, b])
-                labels.append(1.0)
-            for b in rng.sample(others, min(n_neg, len(others))):
+                out.append(1.0)
+            for b in rng.sample(neg_pool, min(n_neg, len(neg_pool))):
                 pairs.append([a, b])
-                labels.append(0.0)
-    return pairs, labels
+                out.append(0.0)
+    return pairs, out
 
 
 def train_cross_encoder(base, pairs, labels, epochs, seed):
@@ -57,7 +74,9 @@ def train_cross_encoder(base, pairs, labels, epochs, seed):
     from sentence_transformers.cross_encoder import CrossEncoder
     from torch.utils.data import DataLoader
 
-    model = CrossEncoder(base, num_labels=1)
+    # ignore_mismatched_sizes lets us re-head a 3-label NLI checkpoint to 1 logit
+    model = CrossEncoder(base, num_labels=1,
+                         model_kwargs={"ignore_mismatched_sizes": True})
     examples = [InputExample(texts=p, label=y) for p, y in zip(pairs, labels)]
     loader = DataLoader(examples, batch_size=32, shuffle=True)
     model.fit(train_dataloader=loader, epochs=epochs, warmup_steps=int(0.1 * len(loader)),
@@ -82,6 +101,8 @@ def main() -> None:
     parser.add_argument("--epochs", type=int, default=2)
     parser.add_argument("--n-pos", type=int, default=8)
     parser.add_argument("--n-neg", type=int, default=8)
+    parser.add_argument("--hard-neg", action="store_true", help="mine negatives from nearest intents")
+    parser.add_argument("--near-m", type=int, default=10, help="how many nearest intents for hard negs")
     args = parser.parse_args()
 
     from sentence_transformers import SentenceTransformer
@@ -107,7 +128,8 @@ def main() -> None:
         stage1.append(float((classes[order[:, 0]] == ty).mean()))
         oracle_k.append(float(np.mean([ty[i] in cand[i] for i in range(len(ty))])))
 
-        pairs, labels = make_pairs(ftx, fy, args.n_pos, args.n_neg, seed)
+        pairs, labels = make_pairs(ftx, fy, Xtr, args.n_pos, args.n_neg,
+                                   args.hard_neg, args.near_m, seed)
         ce = train_cross_encoder(args.ce_base, pairs, labels, args.epochs, seed)
 
         exemplars: dict[int, list[str]] = {}
@@ -139,7 +161,7 @@ def main() -> None:
 
     print(f"{args.dataset} {args.shots}-shot, base={args.base.split('/')[-1]}, "
           f"ce={args.ce_base.split('/')[-1]}, epochs={args.epochs}, k={args.k}, "
-          f"{args.seeds} seeds")
+          f"hard_neg={args.hard_neg} near_m={args.near_m}, {args.seeds} seeds")
     print(f"stage-1 top1     : {mean(stage1):.3f}")
     print(f"oracle@{args.k}         : {mean(oracle_k):.3f}   (ceiling)")
     print(f"pure rerank      : {mean(pure_rerank):.3f}")
