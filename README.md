@@ -74,8 +74,8 @@ Top-1 accuracy, few-shot (20 examples/intent), averaged over seeds:
 
 | dataset | accuracy |
 |---|---:|
-| CLINC150 | 0.97 |
-| Banking77 | 0.92 |
+| CLINC150 | 0.975 |
+| Banking77 | 0.915 |
 
 Banking77's intents overlap heavily, so it is the harder ceiling; CLINC150 is
 near-saturated. Reproduce with `uv run python scripts/benchmark.py`.
