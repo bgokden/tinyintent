@@ -138,6 +138,21 @@ margin), so you can gate on confidence — e.g. re-prompt, confirm, or hand over
 to a human when the top score is low or the margin is thin. Here the objection
 lands at 0.60, a genuinely closer call than the 0.85 commit.
 
+`conversation_agent.py` implements this gate (`MIN_SCORE` / `MIN_MARGIN`): when
+the best edge is too weak, it takes **no transition** — it stays in the node and
+asks the caller to clarify, then routes cleanly on the next turn.
+
+```
+caller: 'well, it depends'        ->  [uncertain: question 0.18] -- no transition
+agent [INTRODUCTION]: Sorry, I didn't quite catch that -- could you say a bit more?
+caller: 'yeah okay, tell me more' ->  [interested 0.88]
+agent [PITCH]: We help homeowners cut their electric bill...
+```
+
+Because the model always decides, this "do nothing / ask again" (or a dedicated
+clarify node) policy lives in your graph, not the classifier — which is the
+right place for it when you build the agent yourself.
+
 ### Measuring routing quality
 
 `examples/eval_flow.py` holds out part of the flow data, trains on the rest, and

@@ -59,6 +59,13 @@ NODES: dict[str, dict] = {
 }
 
 
+# Confidence gate: if the best edge is weak or too close to the runner-up, the
+# agent does NOT transition -- it stays in the node and asks the caller to
+# clarify. The model always decides; the agent decides whether to trust it.
+MIN_SCORE = 0.45
+MIN_MARGIN = 0.10
+
+
 def rank_allowed(model: IntentModel, node: str, utterance: str) -> list[tuple[str, float]]:
     """Intents that are valid edges out of the node, with scores, best first."""
 
@@ -74,9 +81,19 @@ def run(model: IntentModel, caller_turns: list[str]) -> None:
     for utterance in caller_turns:
         ranked = rank_allowed(model, node, utterance)
         intent, score = ranked[0]
-        margin = f", runner-up {ranked[1][0]} {ranked[1][1]:.2f}" if len(ranked) > 1 else ""
+        runner, runner_score = ranked[1] if len(ranked) > 1 else (None, 0.0)
+        margin = score - runner_score
+
+        if score < MIN_SCORE or margin < MIN_MARGIN:
+            # too uncertain: no transition, stay put and ask to clarify
+            print(f"  caller: {utterance!r}   ->  [uncertain: {intent} {score:.2f}, "
+                  f"margin {margin:.2f}] -- no transition")
+            print(f"agent [{node}]: Sorry, I didn't quite catch that -- could you say a bit more?")
+            continue
+
         node = NODES[node]["edges"][intent]
-        print(f"  caller: {utterance!r}   ->  [{intent} {score:.2f}{margin}]")
+        extra = f", runner-up {runner} {runner_score:.2f}" if runner else ""
+        print(f"  caller: {utterance!r}   ->  [{intent} {score:.2f}{extra}]")
         print(f"agent [{node}]: {NODES[node]['say']}")
         if not NODES[node]["edges"]:            # terminal node ends the call
             break
@@ -100,6 +117,12 @@ def main() -> None:
 
     print("=== call 3: hands off to a human ===")
     run(model, ["sure, tell me more", "can I talk to a real person"])
+
+    print("=== call 4: vague reply -> clarify, no transition, then resolves ===")
+    run(model, [
+        "well, it depends",          # too vague to route -> agent clarifies, stays
+        "yeah okay, tell me more",   # now clear -> interested -> PITCH
+    ])
 
 
 if __name__ == "__main__":
