@@ -50,23 +50,24 @@ ACTIONS = {
 }
 
 
-def route(model: IntentModel, state: str, utterance: str) -> str:
-    """Highest-ranked intent that is a valid edge out of the current state."""
+def rank_allowed(model: IntentModel, state: str, utterance: str) -> list[tuple[str, float]]:
+    """Intents that are valid edges out of the state, with scores, best first."""
 
-    allowed = GRAPH[state]
-    for intent, _score in model.predict(utterance).ranking:
-        if intent in allowed:
-            return intent
-    return next(iter(allowed))          # fallback: first allowed edge
+    edges = GRAPH[state]
+    ranked = [(intent, score) for intent, score in model.predict(utterance).ranking
+              if intent in edges]
+    return ranked or [(next(iter(edges)), 0.0)]
 
 
 def run(model: IntentModel, messages: list[str]) -> None:
     state = "ROUTER"
     for msg in messages:
-        intent = route(model, state, msg)
+        ranked = rank_allowed(model, state, msg)
+        intent, score = ranked[0]
+        margin = f"  (runner-up {ranked[1][0]} {ranked[1][1]:.2f})" if len(ranked) > 1 else ""
         nxt = GRAPH[state][intent]
         print(f"[{state}] user: {msg!r}")
-        print(f"    -> intent={intent} | {ACTIONS[intent]} | next={nxt}")
+        print(f"    -> intent={intent} ({score:.2f}){margin} | {ACTIONS[intent]} | next={nxt}")
         state = nxt
         if state == "END":
             break

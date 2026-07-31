@@ -97,9 +97,9 @@ draft → confirm/cancel path.
 uv run python examples/graph_agent.py
 
 [ROUTER] user: 'send an email to Sam about lunch'
-    -> intent=email | drafted the email -- confirm to send? | next=EMAIL_CONFIRM
+    -> intent=email (0.72)  (runner-up reminder 0.08) | drafted the email... | next=EMAIL_CONFIRM
 [EMAIL_CONFIRM] user: 'yes go ahead'
-    -> intent=confirm | email sent | next=ROUTER
+    -> intent=confirm (0.88)  (runner-up cancel 0.01) | email sent | next=ROUTER
 ```
 
 The ranking matters here: in `EMAIL_CONFIRM` the agent only accepts `confirm` or
@@ -125,13 +125,18 @@ classifies the caller's reply and the agent follows the valid edge.
 uv run python examples/conversation_agent.py
 
 agent [PITCH]: We help homeowners cut their electric bill with rooftop solar...
-  caller: 'we already use another provider'   ->  [objection]
+  caller: 'we already use another provider'   ->  [objection 0.60, runner-up question 0.11]
 agent [OBJECTION]: I hear you -- a lot of our customers felt the same...
-  caller: 'okay that sounds interesting'   ->  [interested]
+  caller: 'okay that sounds interesting'   ->  [interested 0.82, runner-up commit 0.03]
 agent [CLOSE]: I'd love to book you a free 15-minute assessment. Shall I set that up?
-  caller: "yes let's do it"   ->  [commit]
+  caller: "yes let's do it"   ->  [commit 0.85, runner-up goodbye 0.04]
 agent [BOOKED]: Fantastic, you're all set...
 ```
+
+Both agents print the chosen intent's **score** and the **runner-up** (the
+margin), so you can gate on confidence — e.g. re-prompt, confirm, or hand over
+to a human when the top score is low or the margin is thin. Here the objection
+lands at 0.60, a genuinely closer call than the 0.85 commit.
 
 ## Data format
 

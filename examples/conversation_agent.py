@@ -59,23 +59,24 @@ NODES: dict[str, dict] = {
 }
 
 
-def route(model: IntentModel, node: str, utterance: str) -> str:
-    """Highest-ranked intent that is a valid edge out of the current node."""
+def rank_allowed(model: IntentModel, node: str, utterance: str) -> list[tuple[str, float]]:
+    """Intents that are valid edges out of the node, with scores, best first."""
 
     edges = NODES[node]["edges"]
-    for intent, _score in model.predict(utterance).ranking:
-        if intent in edges:
-            return intent
-    return next(iter(edges))
+    ranked = [(intent, score) for intent, score in model.predict(utterance).ranking
+              if intent in edges]
+    return ranked or [(next(iter(edges)), 0.0)]
 
 
 def run(model: IntentModel, caller_turns: list[str]) -> None:
     node = "INTRODUCTION"
     print(f"agent [{node}]: {NODES[node]['say']}")
     for utterance in caller_turns:
-        intent = route(model, node, utterance)
+        ranked = rank_allowed(model, node, utterance)
+        intent, score = ranked[0]
+        margin = f", runner-up {ranked[1][0]} {ranked[1][1]:.2f}" if len(ranked) > 1 else ""
         node = NODES[node]["edges"][intent]
-        print(f"  caller: {utterance!r}   ->  [{intent}]")
+        print(f"  caller: {utterance!r}   ->  [{intent} {score:.2f}{margin}]")
         print(f"agent [{node}]: {NODES[node]['say']}")
         if not NODES[node]["edges"]:            # terminal node ends the call
             break
