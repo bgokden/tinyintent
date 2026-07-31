@@ -47,7 +47,7 @@ model.save("model")
 print(model.classify("I want my money back for order 883"))   # refund
 
 pred = model.predict("I want my money back for order 883")
-print(pred.intent, pred.score)      # refund 0.83
+print(pred.intent, pred.score)      # refund 0.80
 print(pred.ranking[:3])             # ranked intents
 print(pred.explanation)             # nearest labelled example
 ```
@@ -106,7 +106,7 @@ The ranking matters here: in `EMAIL_CONFIRM` the agent only accepts `confirm` or
 `cancel`, so it picks the top-ranked intent among those rather than the global
 best.
 
-## Conversational flow (Retell-style)
+## Conversational flow
 
 The same graph pattern drives a conversational agent, where nodes are call
 *phases* rather than tools. `examples/sales_flow.jsonl` labels **conversational

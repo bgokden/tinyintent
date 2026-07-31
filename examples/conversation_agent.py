@@ -1,4 +1,4 @@
-"""A conversational-flow agent (Retell-style) driven by tinyintent.
+"""A conversational-flow agent driven by tinyintent.
 
 The conversation is a graph. Each node is a phase of the call with a line the
 agent says and a set of edges keyed by *conversational* intent (interested,
