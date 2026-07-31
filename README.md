@@ -138,6 +138,32 @@ margin), so you can gate on confidence — e.g. re-prompt, confirm, or hand over
 to a human when the top score is low or the margin is thin. Here the objection
 lands at 0.60, a genuinely closer call than the 0.85 commit.
 
+### Measuring routing quality
+
+`examples/eval_flow.py` holds out part of the flow data, trains on the rest, and
+scores the routing on unseen utterances — accuracy, macro / weighted F1, and a
+per-intent breakdown (pooled over splits):
+
+```
+uv run python examples/eval_flow.py
+
+  accuracy 0.847 | macro-F1 0.833 | weighted-F1 0.835   (n=72)
+
+intent            precision  recall    f1
+greeting              1.000   1.000  1.000
+question              1.000   1.000  1.000
+commit                0.900   1.000  0.947
+handover              0.900   1.000  0.947
+interested            1.000   0.667  0.800
+objection             0.600   0.333  0.429   <- the hard class
+```
+
+The per-intent F1 shows exactly which transitions are reliable and which need
+work: here `objection` is weakest (objections are diverse and overlap with
+questions and rejections), so it is the intent to add more examples for. The
+same report backs `tinyintent evaluate`, and `IntentModel.evaluate(data)`
+returns it as a `Report`.
+
 ## Data format
 
 JSON Lines of `{"text", "label"}`. A handful of examples per intent is enough
@@ -161,7 +187,7 @@ src/tinyintent/
     metrics.py    top-1 accuracy report
     explain.py    nearest labelled example
     cli.py        train / predict / evaluate
-examples/         commerce, agent tools (graph_agent.py), sales flow (conversation_agent.py)
+examples/         commerce, agent tools, sales flow (+ graph/conversation agents, eval_flow.py)
 scripts/          benchmark.py
 tests/            offline tests (hashing encoder)
 ```

@@ -16,8 +16,11 @@ def cmd_train(args: argparse.Namespace) -> None:
 
 def cmd_evaluate(args: argparse.Namespace) -> None:
     model = IntentModel.load(args.model)
-    for key, value in model.evaluate(load_jsonl(args.data)).as_dict().items():
+    report = model.evaluate(load_jsonl(args.data))
+    for key, value in report.as_dict().items():
         print(f"  {key}: {value}")
+    print()
+    print(report.table())
 
 
 def _show(text: str, model: IntentModel) -> None:
