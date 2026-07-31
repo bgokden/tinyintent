@@ -14,7 +14,13 @@ utterance
 
 ## Install
 
-Requires [uv](https://docs.astral.sh/uv/).
+Requires [uv](https://docs.astral.sh/uv/). To use it in your own project:
+
+```bash
+uv add "git+https://github.com/bgokden/tinyintent"
+```
+
+Or clone and set up for development:
 
 ```bash
 uv sync
@@ -212,3 +218,7 @@ tests/            offline tests (hashing encoder)
 
 Argument/slot extraction and multi-turn context, to keep the model small and
 portable.
+
+## License
+
+MIT — see [LICENSE](LICENSE).

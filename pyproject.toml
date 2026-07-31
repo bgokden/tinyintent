@@ -4,11 +4,38 @@ version = "0.1.0"
 description = "A small, portable intent classifier: frozen bge-large embeddings, a linear head, and a trained cross-encoder reranker"
 readme = "README.md"
 requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Berk Gökden" }]
+keywords = [
+    "intent-classification",
+    "intent-detection",
+    "text-classification",
+    "few-shot",
+    "nlp",
+    "sentence-transformers",
+    "cross-encoder",
+    "reranking",
+    "embeddings",
+    "agent-routing",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Text Processing :: Linguistic",
+]
 dependencies = [
     "numpy>=2.0",
     "scikit-learn>=1.5",
     "sentence-transformers>=3.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/bgokden/tinyintent"
+Repository = "https://github.com/bgokden/tinyintent"
+Issues = "https://github.com/bgokden/tinyintent/issues"
 
 [project.scripts]
 tinyintent = "tinyintent.cli:main"
