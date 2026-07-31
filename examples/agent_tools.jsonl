@@ -1,0 +1,94 @@
+{"text": "search the web for the tallest mountain", "label": "web_search"}
+{"text": "look up the population of Japan", "label": "web_search"}
+{"text": "find information about black holes", "label": "web_search"}
+{"text": "google the latest news on AI", "label": "web_search"}
+{"text": "what does the internet say about intermittent fasting", "label": "web_search"}
+{"text": "search for a good pasta recipe", "label": "web_search"}
+{"text": "look up who won the game last night", "label": "web_search"}
+{"text": "find articles about climate change", "label": "web_search"}
+{"text": "calculate 15% of 240", "label": "calculator"}
+{"text": "what is 45 times 12", "label": "calculator"}
+{"text": "add 340 and 512", "label": "calculator"}
+{"text": "what's the square root of 144", "label": "calculator"}
+{"text": "compute the total of 19.99 and 5.50", "label": "calculator"}
+{"text": "how much is 200 divided by 8", "label": "calculator"}
+{"text": "what is 2 to the power of 10", "label": "calculator"}
+{"text": "sum up 12, 15, and 33", "label": "calculator"}
+{"text": "what's the weather in Paris tomorrow", "label": "weather"}
+{"text": "will it rain today", "label": "weather"}
+{"text": "what's the temperature outside", "label": "weather"}
+{"text": "do I need an umbrella tomorrow", "label": "weather"}
+{"text": "give me the forecast for this weekend", "label": "weather"}
+{"text": "how hot will it be in Dubai", "label": "weather"}
+{"text": "is it snowing in Denver", "label": "weather"}
+{"text": "what's the humidity right now", "label": "weather"}
+{"text": "schedule a meeting for Monday at 10am", "label": "calendar"}
+{"text": "add a dentist appointment to my calendar", "label": "calendar"}
+{"text": "what's on my agenda today", "label": "calendar"}
+{"text": "block two hours for deep work tomorrow", "label": "calendar"}
+{"text": "do I have anything on Friday", "label": "calendar"}
+{"text": "move my 3pm to 4pm", "label": "calendar"}
+{"text": "set up a call with the team next week", "label": "calendar"}
+{"text": "clear my afternoon", "label": "calendar"}
+{"text": "send an email to Sam about lunch", "label": "email"}
+{"text": "draft a message to the team", "label": "email"}
+{"text": "email my manager the report", "label": "email"}
+{"text": "write an email to support", "label": "email"}
+{"text": "compose a note to Alex", "label": "email"}
+{"text": "send a follow-up to the client", "label": "email"}
+{"text": "reply to Dana's message", "label": "email"}
+{"text": "shoot an email to accounting", "label": "email"}
+{"text": "translate this to French", "label": "translate"}
+{"text": "how do you say thank you in Spanish", "label": "translate"}
+{"text": "translate good morning into Japanese", "label": "translate"}
+{"text": "what's hello in German", "label": "translate"}
+{"text": "convert this sentence to Italian", "label": "translate"}
+{"text": "say goodbye in Portuguese", "label": "translate"}
+{"text": "translate the paragraph to Chinese", "label": "translate"}
+{"text": "how do I say where is the station in Korean", "label": "translate"}
+{"text": "remind me to call the dentist at 3pm", "label": "reminder"}
+{"text": "set a reminder for the meeting", "label": "reminder"}
+{"text": "remind me to take out the trash tonight", "label": "reminder"}
+{"text": "ping me in 20 minutes", "label": "reminder"}
+{"text": "don't let me forget to buy milk", "label": "reminder"}
+{"text": "set an alarm for 6am", "label": "reminder"}
+{"text": "remind me about mom's birthday next week", "label": "reminder"}
+{"text": "nudge me to submit the form tomorrow", "label": "reminder"}
+{"text": "run this python script", "label": "code_run"}
+{"text": "execute the code below", "label": "code_run"}
+{"text": "evaluate this snippet", "label": "code_run"}
+{"text": "run the function and show the output", "label": "code_run"}
+{"text": "what does this code return", "label": "code_run"}
+{"text": "execute print hello world", "label": "code_run"}
+{"text": "run the unit tests", "label": "code_run"}
+{"text": "compile and run this program", "label": "code_run"}
+{"text": "yes go ahead", "label": "confirm"}
+{"text": "yes please", "label": "confirm"}
+{"text": "confirm", "label": "confirm"}
+{"text": "send it", "label": "confirm"}
+{"text": "go ahead and do it", "label": "confirm"}
+{"text": "that's correct, do it", "label": "confirm"}
+{"text": "yep, proceed", "label": "confirm"}
+{"text": "sounds good, send", "label": "confirm"}
+{"text": "no cancel that", "label": "cancel"}
+{"text": "don't send it", "label": "cancel"}
+{"text": "cancel", "label": "cancel"}
+{"text": "scrap it", "label": "cancel"}
+{"text": "never mind", "label": "cancel"}
+{"text": "stop, don't do that", "label": "cancel"}
+{"text": "no, discard it", "label": "cancel"}
+{"text": "forget it", "label": "cancel"}
+{"text": "that's all thanks", "label": "exit"}
+{"text": "I'm done", "label": "exit"}
+{"text": "goodbye", "label": "exit"}
+{"text": "nothing else", "label": "exit"}
+{"text": "exit", "label": "exit"}
+{"text": "we're finished", "label": "exit"}
+{"text": "that will be all", "label": "exit"}
+{"text": "bye for now", "label": "exit"}
+{"text": "tell me a joke", "label": "oos"}
+{"text": "what's your name", "label": "oos"}
+{"text": "how are you today", "label": "oos"}
+{"text": "sing me a song", "label": "oos"}
+{"text": "what do you think about pizza", "label": "oos"}
+{"text": "who is your favorite artist", "label": "oos"}

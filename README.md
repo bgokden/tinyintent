@@ -80,6 +80,32 @@ Top-1 accuracy, few-shot (20 examples/intent), averaged over seeds:
 Banking77's intents overlap heavily, so it is the harder ceiling; CLINC150 is
 near-saturated. Reproduce with `uv run python scripts/benchmark.py`.
 
+## Agent tool routing
+
+The classic use case: decide which tool an agent should call. Label each intent
+with a tool name, and the predicted intent is the tool to invoke (or to inject
+into an LLM prompt). `examples/agent_tools.jsonl` is a toy dataset for this
+(web_search, calculator, weather, calendar, email, ...).
+
+`examples/graph_agent.py` builds a small **state-machine agent** on top: each
+state allows a subset of intents as edges, and the agent follows the
+highest-ranked *allowed* edge — so one classifier drives both tool selection
+and control flow. Most tools return to the router; email is a two-step
+draft → confirm/cancel path.
+
+```
+uv run python examples/graph_agent.py
+
+[ROUTER] user: 'send an email to Sam about lunch'
+    -> intent=email | drafted the email -- confirm to send? | next=EMAIL_CONFIRM
+[EMAIL_CONFIRM] user: 'yes go ahead'
+    -> intent=confirm | email sent | next=ROUTER
+```
+
+The ranking matters here: in `EMAIL_CONFIRM` the agent only accepts `confirm` or
+`cancel`, so it picks the top-ranked intent among those rather than the global
+best.
+
 ## Data format
 
 JSON Lines of `{"text", "label"}`. A handful of examples per intent is enough
@@ -103,7 +129,7 @@ src/tinyintent/
     metrics.py    top-1 accuracy report
     explain.py    nearest labelled example
     cli.py        train / predict / evaluate
-examples/         commerce intents
+examples/         commerce intents, agent tools + graph_agent.py demo
 scripts/          benchmark.py
 tests/            offline tests (hashing encoder)
 ```
