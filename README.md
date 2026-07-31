@@ -97,9 +97,9 @@ draft → confirm/cancel path.
 uv run python examples/graph_agent.py
 
 [ROUTER] user: 'send an email to Sam about lunch'
-    -> intent=email (0.72)  (runner-up reminder 0.08) | drafted the email... | next=EMAIL_CONFIRM
+    -> intent=email (0.87)  (runner-up reminder 0.06) | drafted the email... | next=EMAIL_CONFIRM
 [EMAIL_CONFIRM] user: 'yes go ahead'
-    -> intent=confirm (0.88)  (runner-up cancel 0.01) | email sent | next=ROUTER
+    -> intent=confirm (0.91)  (runner-up cancel 0.03) | email sent | next=ROUTER
 ```
 
 The ranking matters here: in `EMAIL_CONFIRM` the agent only accepts `confirm` or
@@ -125,32 +125,33 @@ classifies the caller's reply and the agent follows the valid edge.
 uv run python examples/conversation_agent.py
 
 agent [PITCH]: We help homeowners cut their electric bill with rooftop solar...
-  caller: 'we already use another provider'   ->  [objection 0.60, runner-up question 0.11]
+  caller: 'we already use another provider'   ->  [objection 0.90]
 agent [OBJECTION]: I hear you -- a lot of our customers felt the same...
-  caller: 'okay that sounds interesting'   ->  [interested 0.82, runner-up commit 0.03]
+  caller: 'okay that sounds interesting'   ->  [interested 0.91]
 agent [CLOSE]: I'd love to book you a free 15-minute assessment. Shall I set that up?
-  caller: "yes let's do it"   ->  [commit 0.85, runner-up goodbye 0.04]
+  caller: "yes let's do it"   ->  [commit 0.90]
 agent [BOOKED]: Fantastic, you're all set...
 ```
 
-Both agents print the chosen intent's **score** and the **runner-up** (the
-margin), so you can gate on confidence — e.g. re-prompt, confirm, or hand over
-to a human when the top score is low or the margin is thin. Here the objection
-lands at 0.60, a genuinely closer call than the 0.85 commit.
+`predict` returns a **single confidence** (`Prediction.score`) — the reranked
+softmax over the top candidates — and `ranking` is ordered by that same number,
+so the top is always the decision and the margin to the runner-up is
+non-negative. That is what you gate on: confident transitions land around
+0.85-0.91; a genuinely ambiguous reply drops well below.
 
-`conversation_agent.py` implements this gate (`MIN_SCORE` / `MIN_MARGIN`): when
-the best edge is too weak, it takes **no transition** — it stays in the node and
-asks the caller to clarify, then routes cleanly on the next turn.
+`conversation_agent.py` uses it as a gate (`MIN_SCORE` / `MIN_MARGIN`): when the
+best edge is too weak, the agent **stays in the node** (a self-loop -- a normal
+FSM choice) and asks the caller to clarify, then routes cleanly next turn.
 
 ```
-caller: 'well, it depends'        ->  [uncertain: question 0.18] -- no transition
+caller: 'well, it depends'        ->  [uncertain: question 0.43, margin 0.10]  STAY + clarify
 agent [INTRODUCTION]: Sorry, I didn't quite catch that -- could you say a bit more?
-caller: 'yeah okay, tell me more' ->  [interested 0.88]
+caller: 'yeah okay, tell me more' ->  [interested 0.91]
 agent [PITCH]: We help homeowners cut their electric bill...
 ```
 
-Because the model always decides, this "do nothing / ask again" (or a dedicated
-clarify node) policy lives in your graph, not the classifier — which is the
+Because the model always decides, this policy — stay/self-loop, ask again, or a
+dedicated clarify node — lives in your graph, not the classifier, which is the
 right place for it when you build the agent yourself.
 
 ### Measuring routing quality

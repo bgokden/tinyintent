@@ -104,7 +104,14 @@ class CrossEncoderReranker:
         return self
 
     def rerank_scores(self, query_texts: list[str], stage1: np.ndarray) -> np.ndarray:
-        """Return an adjusted score matrix; argmax/argsort then picks the rerank."""
+        """Return a confidence matrix over labels.
+
+        The reranked top-k candidates get a softmax over the combined
+        stage-1 + cross-encoder signal (so they sum to 1 and the winner is
+        highest); every other label gets 0. This is a single, consistent
+        confidence: argmax is the decision and the top-minus-runner-up margin
+        is always non-negative.
+        """
 
         n, n_labels = stage1.shape
         k = min(self.k, n_labels)
@@ -131,15 +138,13 @@ class CrossEncoderReranker:
         cand_scores = np.take_along_axis(stage1, order, axis=1)
         s1z = _zscore_rows(np.log(np.clip(cand_scores, 1e-12, None)))
         cez = _zscore_rows(ce_score)
-        combined = s1z + self.beta * cez
+        combined = s1z + self.beta * cez                  # [n, k]
 
-        out = stage1.astype(float).copy()
-        for i in range(n):
-            base = float(out[i].max()) + 1.0              # keep candidates above the rest
-            ranked = np.argsort(-combined[i])
-            for rank, j in enumerate(ranked):
-                out[i, order[i][j]] = base + (k - rank)
-        return out
+        exps = np.exp(combined - combined.max(axis=1, keepdims=True))
+        probs = exps / exps.sum(axis=1, keepdims=True)    # softmax over the k candidates
+        conf = np.zeros_like(stage1, dtype=float)         # non-candidates -> 0
+        np.put_along_axis(conf, order, probs, axis=1)
+        return conf
 
     def save(self, directory: str | Path) -> None:
         directory = Path(directory)

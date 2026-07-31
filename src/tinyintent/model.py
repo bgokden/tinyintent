@@ -18,9 +18,11 @@ from tinyintent.scorer import LinearScorer
 class Prediction:
     """The outcome of classifying one utterance.
 
-    ``intent`` is the single best intent (the model always decides).
-    ``score`` is the stage-1 probability of that intent, ``ranking`` lists
-    every intent by rank, and ``explanation`` is the nearest labelled example.
+    ``intent`` is the single best intent (the model always decides). ``score``
+    is its confidence and ``ranking`` lists every intent by that same
+    confidence (descending, so ``ranking[0]`` is ``intent`` and the margin to
+    ``ranking[1]`` is non-negative). ``explanation`` is the nearest labelled
+    example.
     """
 
     intent: str
@@ -85,7 +87,11 @@ class IntentModel:
 
     # -- inference ----------------------------------------------------------
 
-    def _ranking_scores(self, texts: list[str], stage1: np.ndarray) -> np.ndarray:
+    def _confidence(self, texts: list[str]) -> np.ndarray:
+        """One consistent confidence matrix: reranked if a reranker is set,
+        else the stage-1 probabilities."""
+
+        stage1 = self.scorer.scores(self._embed(texts))
         if self.reranker is None:
             return stage1
         return self.reranker.rerank_scores(texts, stage1)
@@ -96,29 +102,27 @@ class IntentModel:
     def classify_batch(self, texts: list[str]) -> list[str]:
         """Return the single best intent for each text."""
 
-        stage1 = self.scorer.scores(self._embed(texts))
-        ranking = self._ranking_scores(texts, stage1)
-        return [self.label_names[int(i)] for i in ranking.argmax(axis=1)]
+        conf = self._confidence(texts)
+        return [self.label_names[int(i)] for i in conf.argmax(axis=1)]
 
     def predict(self, text: str) -> Prediction:
         return self.predict_batch([text])[0]
 
     def predict_batch(self, texts: list[str]) -> list[Prediction]:
         vectors = self._embed(texts)
-        stage1 = self.scorer.scores(vectors)
-        rank = self._ranking_scores(texts, stage1)
+        conf = self._confidence(texts)
         results: list[Prediction] = []
 
         for row in range(len(texts)):
-            order = np.argsort(rank[row])[::-1]
+            order = np.argsort(conf[row])[::-1]
             top_idx = int(order[0])
-            ranking = [(self.label_names[int(i)], float(stage1[row][i])) for i in order]
+            ranking = [(self.label_names[int(i)], float(conf[row][i])) for i in order]
             explanation = nearest_example(
                 vectors[row], top_idx,
                 self._train_vectors, self._train_y, self._train_texts,
             )
             results.append(
-                Prediction(self.label_names[top_idx], float(stage1[row][top_idx]),
+                Prediction(self.label_names[top_idx], float(conf[row][top_idx]),
                            ranking, explanation)
             )
         return results

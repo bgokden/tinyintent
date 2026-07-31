@@ -59,18 +59,20 @@ NODES: dict[str, dict] = {
 }
 
 
-# Confidence gate: if the best edge is weak or too close to the runner-up, the
-# agent does NOT transition -- it stays in the node and asks the caller to
-# clarify. The model always decides; the agent decides whether to trust it.
+# Confidence gate: below these the agent does not trust the classifier -- it
+# stays in the node and asks the caller to clarify. The model always decides;
+# the agent (this graph) decides whether to act on it. Note a confident
+# self-loop edge (e.g. another question) is a normal transition, distinct from
+# this uncertainty stay.
 MIN_SCORE = 0.45
 MIN_MARGIN = 0.10
 
 
 def rank_allowed(model: IntentModel, node: str, utterance: str) -> list[tuple[str, float]]:
-    """Intents that are valid edges out of the node, with scores, best first."""
+    """Intents that are valid edges out of the node, with confidence, best first."""
 
     edges = NODES[node]["edges"]
-    ranked = [(intent, score) for intent, score in model.predict(utterance).ranking
+    ranked = [(intent, conf) for intent, conf in model.predict(utterance).ranking
               if intent in edges]
     return ranked or [(next(iter(edges)), 0.0)]
 
@@ -81,19 +83,19 @@ def run(model: IntentModel, caller_turns: list[str]) -> None:
     for utterance in caller_turns:
         ranked = rank_allowed(model, node, utterance)
         intent, score = ranked[0]
-        runner, runner_score = ranked[1] if len(ranked) > 1 else (None, 0.0)
-        margin = score - runner_score
+        margin = score - (ranked[1][1] if len(ranked) > 1 else 0.0)
 
         if score < MIN_SCORE or margin < MIN_MARGIN:
-            # too uncertain: no transition, stay put and ask to clarify
+            # uncertainty stay: hold the node, ask to clarify (no confident edge)
             print(f"  caller: {utterance!r}   ->  [uncertain: {intent} {score:.2f}, "
-                  f"margin {margin:.2f}] -- no transition")
+                  f"margin {margin:.2f}]  STAY + clarify")
             print(f"agent [{node}]: Sorry, I didn't quite catch that -- could you say a bit more?")
             continue
 
-        node = NODES[node]["edges"][intent]
-        extra = f", runner-up {runner} {runner_score:.2f}" if runner else ""
-        print(f"  caller: {utterance!r}   ->  [{intent} {score:.2f}{extra}]")
+        nxt = NODES[node]["edges"][intent]
+        loop = "  (self-loop)" if nxt == node else ""
+        print(f"  caller: {utterance!r}   ->  [{intent} {score:.2f}]{loop}")
+        node = nxt
         print(f"agent [{node}]: {NODES[node]['say']}")
         if not NODES[node]["edges"]:            # terminal node ends the call
             break
