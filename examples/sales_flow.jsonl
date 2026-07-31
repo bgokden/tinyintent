@@ -1,0 +1,70 @@
+{"text": "hello", "label": "greeting"}
+{"text": "hi there", "label": "greeting"}
+{"text": "speaking", "label": "greeting"}
+{"text": "yes this is her", "label": "greeting"}
+{"text": "yes that's me", "label": "greeting"}
+{"text": "hey", "label": "greeting"}
+{"text": "good morning", "label": "greeting"}
+{"text": "this is he", "label": "greeting"}
+{"text": "sure, tell me more", "label": "interested"}
+{"text": "yeah tell me more", "label": "interested"}
+{"text": "that sounds interesting", "label": "interested"}
+{"text": "go on", "label": "interested"}
+{"text": "okay I'm listening", "label": "interested"}
+{"text": "that could be useful", "label": "interested"}
+{"text": "I'm curious, continue", "label": "interested"}
+{"text": "alright, what have you got", "label": "interested"}
+{"text": "not interested", "label": "not_interested"}
+{"text": "no thanks", "label": "not_interested"}
+{"text": "please remove me from your list", "label": "not_interested"}
+{"text": "I don't want this", "label": "not_interested"}
+{"text": "stop calling me", "label": "not_interested"}
+{"text": "we're all set, no thanks", "label": "not_interested"}
+{"text": "not for me", "label": "not_interested"}
+{"text": "I'll pass", "label": "not_interested"}
+{"text": "how much does it cost", "label": "question"}
+{"text": "what exactly do you offer", "label": "question"}
+{"text": "how does it work", "label": "question"}
+{"text": "who else uses this", "label": "question"}
+{"text": "is there a free trial", "label": "question"}
+{"text": "what's included", "label": "question"}
+{"text": "how long does setup take", "label": "question"}
+{"text": "can you explain the pricing", "label": "question"}
+{"text": "that's too expensive", "label": "objection"}
+{"text": "I don't have time for this", "label": "objection"}
+{"text": "we already use another provider", "label": "objection"}
+{"text": "I need to think about it", "label": "objection"}
+{"text": "I'm not sure it's worth it", "label": "objection"}
+{"text": "my budget is tight right now", "label": "objection"}
+{"text": "I've had bad experiences before", "label": "objection"}
+{"text": "let me discuss with my team first", "label": "objection"}
+{"text": "yes let's do it", "label": "commit"}
+{"text": "sign me up", "label": "commit"}
+{"text": "let's proceed", "label": "commit"}
+{"text": "okay I'm in", "label": "commit"}
+{"text": "book the appointment", "label": "commit"}
+{"text": "sounds good, where do I sign", "label": "commit"}
+{"text": "let's get started", "label": "commit"}
+{"text": "yes I'll take it", "label": "commit"}
+{"text": "can I talk to a real person", "label": "handover"}
+{"text": "transfer me to an agent", "label": "handover"}
+{"text": "I want to speak to a manager", "label": "handover"}
+{"text": "put me through to a human", "label": "handover"}
+{"text": "let me speak with someone", "label": "handover"}
+{"text": "can a specialist call me", "label": "handover"}
+{"text": "I'd rather talk to a representative", "label": "handover"}
+{"text": "connect me to your supervisor", "label": "handover"}
+{"text": "I have to go now", "label": "goodbye"}
+{"text": "call me back later", "label": "goodbye"}
+{"text": "goodbye", "label": "goodbye"}
+{"text": "I'm busy right now", "label": "goodbye"}
+{"text": "let's talk another time", "label": "goodbye"}
+{"text": "bye", "label": "goodbye"}
+{"text": "gotta run", "label": "goodbye"}
+{"text": "this isn't a good time", "label": "goodbye"}
+{"text": "what's the weather like", "label": "oos"}
+{"text": "tell me a joke", "label": "oos"}
+{"text": "do you like music", "label": "oos"}
+{"text": "what time is it", "label": "oos"}
+{"text": "my dog is barking", "label": "oos"}
+{"text": "hold on a second", "label": "oos"}

@@ -106,6 +106,33 @@ The ranking matters here: in `EMAIL_CONFIRM` the agent only accepts `confirm` or
 `cancel`, so it picks the top-ranked intent among those rather than the global
 best.
 
+## Conversational flow (Retell-style)
+
+The same graph pattern drives a conversational agent, where nodes are call
+*phases* rather than tools. `examples/sales_flow.jsonl` labels **conversational
+intents** (interested, question, objection, commit, handover, not_interested,
+goodbye), and `examples/conversation_agent.py` walks a call graph:
+
+```
+INTRODUCTION -> PITCH -> QUESTION -> OBJECTION -> CLOSE -> BOOKED
+             \-> EXIT   \-> HANDOVER
+```
+
+Each node has a line the agent says and intent-keyed edges; tinyintent
+classifies the caller's reply and the agent follows the valid edge.
+
+```
+uv run python examples/conversation_agent.py
+
+agent [PITCH]: We help homeowners cut their electric bill with rooftop solar...
+  caller: 'we already use another provider'   ->  [objection]
+agent [OBJECTION]: I hear you -- a lot of our customers felt the same...
+  caller: 'okay that sounds interesting'   ->  [interested]
+agent [CLOSE]: I'd love to book you a free 15-minute assessment. Shall I set that up?
+  caller: "yes let's do it"   ->  [commit]
+agent [BOOKED]: Fantastic, you're all set...
+```
+
 ## Data format
 
 JSON Lines of `{"text", "label"}`. A handful of examples per intent is enough
@@ -129,7 +156,7 @@ src/tinyintent/
     metrics.py    top-1 accuracy report
     explain.py    nearest labelled example
     cli.py        train / predict / evaluate
-examples/         commerce intents, agent tools + graph_agent.py demo
+examples/         commerce, agent tools (graph_agent.py), sales flow (conversation_agent.py)
 scripts/          benchmark.py
 tests/            offline tests (hashing encoder)
 ```
