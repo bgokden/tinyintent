@@ -14,6 +14,44 @@ from tinyintent.reranker import CrossEncoderReranker
 from tinyintent.scorer import LinearScorer
 
 
+def _check_trainable(examples: list[Example], label_names: list[str]) -> None:
+    """Fail with a message about intents, not about solvers.
+
+    A single-intent dataset used to surface sklearn's "this solver needs
+    samples of at least 2 classes", which says nothing about what the caller
+    got wrong.
+    """
+
+    if not examples:
+        raise ValueError("no training examples")
+    if not label_names:
+        raise ValueError(
+            f"every example is labelled {OOS_LABEL!r}; at least two in-scope "
+            "intents are needed to train a classifier"
+        )
+    if len(label_names) == 1:
+        raise ValueError(
+            f"only one in-scope intent ({label_names[0]!r}); a classifier needs "
+            "at least two. Add a second intent, or use oos examples plus a "
+            "threshold if you want a one-class detector"
+        )
+
+
+def _reject_blank(texts: list[str]) -> None:
+    """Blank input has no intent, and scoring it invents one.
+
+    An empty string still embeds, so the head returns a label with a plausible
+    confidence -- 0.500 on a two-intent model. Better to say so than to answer.
+    """
+
+    for i, text in enumerate(texts):
+        if not text or not text.strip():
+            raise ValueError(
+                f"empty or whitespace-only text at position {i}; there is no "
+                "intent to predict"
+            )
+
+
 def _blend_confidence(stage1: np.ndarray, ce_by_label: np.ndarray) -> np.ndarray:
     """Combine the linear head's probability with the cross-encoder's match.
 
@@ -100,6 +138,7 @@ class IntentModel:
         """Stage 1 only (encoder + linear head). Internal; no reranker."""
 
         label_names = labels_of(examples, include_oos=False)
+        _check_trainable(examples, label_names)
         index = {label: i for i, label in enumerate(label_names)}
 
         in_scope = [ex for ex in examples if ex.label != OOS_LABEL]
@@ -246,6 +285,7 @@ class IntentModel:
     def classify_batch(self, texts: list[str]) -> list[str]:
         """Return the single best intent for each text."""
 
+        _reject_blank(texts)
         conf = self._confidence(texts)
         return [self.label_names[int(i)] for i in conf.argmax(axis=1)]
 
@@ -253,6 +293,7 @@ class IntentModel:
         return self.predict_batch([text])[0]
 
     def predict_batch(self, texts: list[str]) -> list[Prediction]:
+        _reject_blank(texts)
         vectors = self._embed(texts)
         conf, stage1 = self._scores(texts, vectors)
         results: list[Prediction] = []
