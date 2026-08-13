@@ -8,7 +8,7 @@ from tinyintent.model import IntentModel
 
 def cmd_train(args: argparse.Namespace) -> None:
     data = load_jsonl(args.data)
-    model = IntentModel.fit(data)
+    model = IntentModel.fit(data, device=args.device)
     print(f"Trained on {len(data)} examples, {len(model.label_names)} intents")
     if model.oos_threshold is None:
         print("No 'oos' examples: the model will always decide. Add some to "
@@ -48,7 +48,7 @@ def _show(text: str, model: IntentModel) -> None:
 
 
 def cmd_predict(args: argparse.Namespace) -> None:
-    model = IntentModel.load(args.model)
+    model = IntentModel.load(args.model, device=args.device)
     if args.text:
         _show(" ".join(args.text), model)
         return
@@ -71,16 +71,20 @@ def build_parser() -> argparse.ArgumentParser:
     t = sub.add_parser("train", help="train an intent model")
     t.add_argument("--data", required=True)
     t.add_argument("--out", required=True)
+    t.add_argument("--device", default=None,
+                   help="torch device, e.g. cuda / cpu / mps (default: auto)")
     t.set_defaults(func=cmd_train)
 
     e = sub.add_parser("evaluate", help="evaluate a saved model on a dataset")
     e.add_argument("--model", required=True)
     e.add_argument("--data", required=True)
+    e.add_argument("--device", default=None)
     e.set_defaults(func=cmd_evaluate)
 
     p = sub.add_parser("predict", help="predict intent for text (or interactive)")
     p.add_argument("--model", required=True)
     p.add_argument("text", nargs="*")
+    p.add_argument("--device", default=None)
     p.set_defaults(func=cmd_predict)
 
     return parser

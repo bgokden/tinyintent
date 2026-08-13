@@ -73,10 +73,11 @@ class CrossEncoderReranker:
     """
 
     def __init__(self, k: int = 5, beta: float = 0.5,
-                 base_model: str = DEFAULT_CE_MODEL):
+                 base_model: str = DEFAULT_CE_MODEL, device: str | None = None):
         self.k = k
         self.beta = beta
         self.base_model = base_model
+        self.device = device          # not persisted; set it again on load()
         self._ce = None
         self.exemplars: dict[int, list[str]] = {}
 
@@ -98,7 +99,7 @@ class CrossEncoderReranker:
         pairs, targets = _make_pairs(texts, y, vectors, n_pos, n_neg,
                                      hard_neg, near_m, seed)
         # ignore_mismatched_sizes lets a 3-label NLI checkpoint re-head to 1 logit
-        self._ce = CrossEncoder(self.base_model, num_labels=1,
+        self._ce = CrossEncoder(self.base_model, num_labels=1, device=self.device,
                                 model_kwargs={"ignore_mismatched_sizes": True})
         examples = [InputExample(texts=p, label=t) for p, t in zip(pairs, targets)]
         generator = torch.Generator().manual_seed(seed)
@@ -208,12 +209,14 @@ class CrossEncoderReranker:
         )
 
     @classmethod
-    def load(cls, directory: str | Path) -> "CrossEncoderReranker":
+    def load(cls, directory: str | Path,
+             device: str | None = None) -> "CrossEncoderReranker":
         from sentence_transformers.cross_encoder import CrossEncoder
 
         directory = Path(directory)
         config = json.loads((directory / "reranker.json").read_text(encoding="utf-8"))
-        reranker = cls(k=config["k"], beta=config["beta"], base_model=config["base_model"])
-        reranker._ce = CrossEncoder(str(directory / "ce"))
+        reranker = cls(k=config["k"], beta=config["beta"],
+                       base_model=config["base_model"], device=device)
+        reranker._ce = CrossEncoder(str(directory / "ce"), device=device)
         reranker.exemplars = {int(c): ex for c, ex in config["exemplars"].items()}
         return reranker

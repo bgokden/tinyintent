@@ -34,6 +34,7 @@ class SentenceEncoder:
         from sentence_transformers import SentenceTransformer
 
         self.model_name = model_name
+        self.device = device
         self._model = SentenceTransformer(model_name, device=device)
         get_dim = getattr(
             self._model, "get_embedding_dimension", None
@@ -51,6 +52,9 @@ class SentenceEncoder:
         return vectors.astype(np.float32)
 
     def spec(self) -> dict:
+        # `device` is deliberately not persisted: a model trained on a CUDA box
+        # must load on a CPU-only one. Pass device= to load() to override the
+        # default, which lets sentence-transformers pick what is available.
         return {"kind": "sentence-transformers", "model": self.model_name}
 
 
@@ -78,12 +82,12 @@ class HashingEncoder:
         return {"kind": "hashing", "dim": self.dim}
 
 
-def make_encoder(spec: dict) -> Encoder:
-    """Rebuild an encoder from its saved spec."""
+def make_encoder(spec: dict, device: str | None = None) -> Encoder:
+    """Rebuild an encoder from its saved spec, optionally on a given device."""
 
     kind = spec["kind"]
     if kind == "sentence-transformers":
-        return SentenceEncoder(spec.get("model", DEFAULT_MODEL))
+        return SentenceEncoder(spec.get("model", DEFAULT_MODEL), device=device)
     if kind == "hashing":
         return HashingEncoder(int(spec.get("dim", 256)))
     raise ValueError(f"unknown encoder kind: {kind}")

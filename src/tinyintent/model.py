@@ -162,15 +162,19 @@ class IntentModel:
         return model
 
     @classmethod
-    def fit(cls, examples: list[Example]) -> "IntentModel":
+    def fit(cls, examples: list[Example], device: str | None = None) -> "IntentModel":
         """Train the full pipeline: bge-large + linear head + reranker.
 
         Examples labelled ``oos`` do not become a class -- they are held out of
         the classifier and used to fit the abstention threshold instead.
+
+        ``device`` is passed to both transformer models (``"cuda"``, ``"cpu"``,
+        ``"mps"``). The default lets sentence-transformers choose, which picks
+        an accelerator when one is present.
         """
 
-        model = cls._fit_base(examples, SentenceEncoder())
-        model.reranker = CrossEncoderReranker().fit(
+        model = cls._fit_base(examples, SentenceEncoder(device=device))
+        model.reranker = CrossEncoderReranker(device=device).fit(
             model._train_texts, model._train_y, model._train_vectors
         )
         model.fit_oos_threshold(examples)
@@ -385,7 +389,13 @@ class IntentModel:
         )
 
     @classmethod
-    def load(cls, directory: str | Path) -> "IntentModel":
+    def load(cls, directory: str | Path, device: str | None = None) -> "IntentModel":
+        """Load a saved model, optionally onto a specific device.
+
+        The device is not stored in the artifact, so a model trained on a GPU
+        box loads on a CPU-only one without ceremony.
+        """
+
         directory = Path(directory)
         config = json.loads((directory / "config.json").read_text(encoding="utf-8"))
 
@@ -402,12 +412,13 @@ class IntentModel:
             )
 
         model = cls(
-            make_encoder(config["encoder"]),
+            make_encoder(config["encoder"], device=device),
             LinearScorer.load(directory / "scorer"),
             config["label_names"],
         )
         if config.get("reranker"):
-            model.reranker = CrossEncoderReranker.load(directory / "reranker")
+            model.reranker = CrossEncoderReranker.load(directory / "reranker",
+                                                       device=device)
         # Absent in models saved before abstention existed -> always decide.
         model.oos_threshold = config.get("oos_threshold")
 
