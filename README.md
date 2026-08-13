@@ -361,6 +361,24 @@ toward how you write, not how your users do.
 Match the register too. If users type `where's my stuff`, do not train only on
 `I would like to enquire about my delivery`.
 
+**Watch for vocabulary you always include and users often omit.** A six-tool
+router trained with 12 examples per tool, where every `run_sql` example said
+*query*, *table* or *database* and every `send_email` example said *email* or
+*send*, routed both of these correctly but with confidence low enough to
+abstain:
+
+| utterance | intent | confidence |
+|---|---|---:|
+| `how many signups did we get yesterday` | run_sql ✓ | 0.05 |
+| `run a query for signups yesterday` | run_sql ✓ | 0.50 |
+| `let the vendor know we accept` | send_email ✓ | 0.06 |
+| `send the vendor an email saying we accept` | send_email ✓ | 0.75 |
+
+The intent was never wrong — the model was simply unsure, because nothing in
+training looked like a request that omits the tool's own name. Users phrase
+requests by *outcome* far more than by tool. Include those phrasings and the
+confidence follows.
+
 ### 10-20 examples per intent, roughly balanced
 
 Below ~8 the linear head gets unstable; past ~30 the returns flatten and
