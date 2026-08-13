@@ -154,11 +154,23 @@ Inference, same machine:
 
 The reranker dominates inference: it runs the query against every exemplar of
 every candidate intent, so cost grows with examples per intent, not with the
-number of intents. On CLINC150 (150 intents, 20 examples each) it is 47 ms per
-utterance against 3 ms for the head alone — a 15x tax for +0.004 top-1 accuracy
-(0.951 vs 0.947). If you need sub-10 ms routing, set `model.reranker = None`
-after loading; you keep almost all the accuracy and all of the `confidence`
-signal.
+number of intents.
+
+| | with reranker | head only |
+|---|---:|---:|
+| CLINC150 top-1 accuracy | 0.951 | 0.947 |
+| inference, per utterance | 47 ms | 3 ms |
+| training, 3250 examples | ~8.5 min | ~3 s |
+
+That is a 15x latency tax and most of the training time for +0.004 accuracy.
+It is a genuine trade, so it is a flag rather than a fixed choice:
+
+```python
+model = IntentModel.fit(data, reranker=False)   # or: tinyintent train --no-reranker
+```
+
+`confidence` and abstention work identically either way. You can also drop it
+from an already-trained model with `model.reranker = None`.
 
 A CPU-only Linux box without MPS will be slower, roughly 2-3x on training, so
 treat these as a floor rather than a guarantee.

@@ -8,8 +8,11 @@ from tinyintent.model import IntentModel
 
 def cmd_train(args: argparse.Namespace) -> None:
     data = load_jsonl(args.data)
-    model = IntentModel.fit(data, device=args.device)
-    print(f"Trained on {len(data)} examples, {len(model.label_names)} intents")
+    model = IntentModel.fit(data, device=args.device,
+                            reranker=not args.no_reranker)
+    stage = "encoder + head" if model.reranker is None else "encoder + head + reranker"
+    print(f"Trained on {len(data)} examples, {len(model.label_names)} intents "
+          f"({stage})")
     if model.oos_threshold is None:
         print("No 'oos' examples: the model will always decide. Add some to "
               "enable abstention.")
@@ -73,6 +76,9 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("--out", required=True)
     t.add_argument("--device", default=None,
                    help="torch device, e.g. cuda / cpu / mps (default: auto)")
+    t.add_argument("--no-reranker", action="store_true",
+                   help="train the linear head only: much faster to train and "
+                        "~15x faster to predict, for ~0.004 less top-1 accuracy")
     t.set_defaults(func=cmd_train)
 
     e = sub.add_parser("evaluate", help="evaluate a saved model on a dataset")
