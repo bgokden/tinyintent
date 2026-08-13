@@ -2,7 +2,8 @@
 
 A small, portable intent classifier. Give it a few labelled utterances per
 intent; it maps text to the single best intent on CPU, with no LLM in the loop.
-One opinionated pipeline, no knobs to turn.
+One opinionated pipeline: sensible defaults, and knobs only where the trade-off
+is real.
 
 ```
 utterance
@@ -95,7 +96,10 @@ else:
 ## How it works
 
 `IntentModel.fit(data)` trains three parts, and `classify`/`predict` run them
-in order. There are no options — this is the configuration that measured best.
+in order. The defaults are the configuration that measured best, so the only
+options are the ones with a real trade-off behind them: `reranker=False`
+(accuracy for latency), `device=` (where the models run), and
+`max_exemplars` (inference cost per query).
 
 - **Encoder** — a frozen `bge-large` sentence encoder. It won an encoder sweep
   on the intent benchmarks; nothing smaller matched it and fine-tuning it did
@@ -147,7 +151,7 @@ Inference, same machine:
 | operation | latency |
 |---|---:|
 | `predict` — one utterance | ~55 ms |
-| `predict_batch` — per utterance, batched | ~35 ms |
+| `predict_batch` — per utterance, batched | ~16 ms |
 | `predict_batch` — per utterance, reranker disabled | ~3 ms |
 | `IntentModel.load` | ~3 s |
 | saved model on disk | 92 MB |
@@ -156,14 +160,32 @@ The reranker dominates inference: it runs the query against every exemplar of
 every candidate intent, so cost grows with examples per intent, not with the
 number of intents.
 
+It scores against up to `max_exemplars` (default 6) exemplars per candidate, so
+that cost is bounded rather than growing with your training set. On CLINC150
+(150 intents, 20 examples each), varying the cap:
+
+| exemplars/intent | top-1 accuracy | OOS abstained | ms/utterance |
+|---:|---:|---:|---:|
+| 20 (uncapped) | 0.9558 | 0.803 | 47.0 |
+| 8 | 0.9525 | 0.837 | 20.7 |
+| **6 (default)** | **0.9542** | **0.845** | **16.4** |
+| 4 | 0.9542 | 0.875 | 12.0 |
+| 2 | 0.9508 | 0.895 | 7.4 |
+
+Capping costs two queries in 1200 and *improves* abstention — fewer exemplars
+mean fewer chances for an unrelated query to match one of them by accident.
+Tune with `CrossEncoderReranker(max_exemplars=...)`; 0 keeps everything.
+
+Against the head alone:
+
 | | with reranker | head only |
 |---|---:|---:|
-| CLINC150 top-1 accuracy | 0.951 | 0.947 |
-| inference, per utterance | 47 ms | 3 ms |
+| CLINC150 top-1 accuracy | 0.954 | 0.947 |
+| inference, per utterance | 16 ms | 3 ms |
 | training, 3250 examples | ~8.5 min | ~3 s |
 
-That is a 15x latency tax and most of the training time for +0.004 accuracy.
-It is a genuine trade, so it is a flag rather than a fixed choice:
+Still a 5x latency tax and most of the training time for +0.007 accuracy. It is
+a genuine trade, so it is a flag rather than a fixed choice:
 
 ```python
 model = IntentModel.fit(data, reranker=False)   # or: tinyintent train --no-reranker

@@ -56,6 +56,41 @@ def _make_pairs(texts, y, vectors, n_pos, n_neg, hard_neg, near_m, seed):
     return pairs, targets
 
 
+def _select_exemplars(texts, y, vectors, max_exemplars: int) -> dict[int, list[str]]:
+    """Pick up to ``max_exemplars`` representative texts per intent.
+
+    Every exemplar costs a cross-encoder pair at query time, so keeping all of
+    them makes inference scale with training-set size for no stated benefit.
+    The keeper is the one closest to the intent's centroid, then each next pick
+    is the candidate least similar to what is already chosen -- so the set
+    spans the intent's phrasings instead of collecting near-duplicates of the
+    centre.
+
+    ``max_exemplars <= 0`` keeps everything.
+    """
+
+    y = np.asarray(y)
+    by_label: dict[int, list[str]] = {}
+    for label in np.unique(y):
+        rows = np.flatnonzero(y == label)
+        candidates = [texts[i] for i in rows]
+        if max_exemplars <= 0 or len(rows) <= max_exemplars:
+            by_label[int(label)] = candidates
+            continue
+
+        group = vectors[rows]
+        centroid = group.mean(axis=0)
+        centroid = centroid / max(float(np.linalg.norm(centroid)), 1e-8)
+
+        chosen = [int(np.argmax(group @ centroid))]
+        while len(chosen) < max_exemplars:
+            similarity_to_chosen = (group @ group[chosen].T).max(axis=1)
+            similarity_to_chosen[chosen] = np.inf        # never re-pick
+            chosen.append(int(np.argmin(similarity_to_chosen)))
+        by_label[int(label)] = [candidates[i] for i in chosen]
+    return by_label
+
+
 def _zscore_rows(matrix: np.ndarray) -> np.ndarray:
     mean = matrix.mean(axis=1, keepdims=True)
     std = matrix.std(axis=1, keepdims=True)
@@ -73,11 +108,17 @@ class CrossEncoderReranker:
     """
 
     def __init__(self, k: int = 5, beta: float = 0.5,
-                 base_model: str = DEFAULT_CE_MODEL, device: str | None = None):
+                 base_model: str = DEFAULT_CE_MODEL, device: str | None = None,
+                 max_exemplars: int = 6):
         self.k = k
         self.beta = beta
         self.base_model = base_model
         self.device = device          # not persisted; set it again on load()
+        # Inference scores the query against every exemplar of every candidate,
+        # so latency is k * max_exemplars cross-encoder pairs per query --
+        # independent of how many intents or examples there are in total.
+        # Keeping every training text made this grow without bound.
+        self.max_exemplars = max_exemplars
         self._ce = None
         self.exemplars: dict[int, list[str]] = {}
 
@@ -108,9 +149,7 @@ class CrossEncoderReranker:
         self._ce.fit(train_dataloader=loader, epochs=epochs,
                      warmup_steps=int(0.1 * len(loader)), show_progress_bar=False)
 
-        self.exemplars = {}
-        for t, label in zip(texts, y):
-            self.exemplars.setdefault(int(label), []).append(t)
+        self.exemplars = _select_exemplars(texts, y, vectors, self.max_exemplars)
         return self
 
     def rerank_scores(self, query_texts: list[str], stage1: np.ndarray) -> np.ndarray:
@@ -203,6 +242,7 @@ class CrossEncoderReranker:
         (directory / "reranker.json").write_text(
             json.dumps({
                 "k": self.k, "beta": self.beta, "base_model": self.base_model,
+                "max_exemplars": self.max_exemplars,
                 "exemplars": {str(c): ex for c, ex in self.exemplars.items()},
             }),
             encoding="utf-8",
@@ -216,7 +256,8 @@ class CrossEncoderReranker:
         directory = Path(directory)
         config = json.loads((directory / "reranker.json").read_text(encoding="utf-8"))
         reranker = cls(k=config["k"], beta=config["beta"],
-                       base_model=config["base_model"], device=device)
+                       base_model=config["base_model"], device=device,
+                       max_exemplars=config.get("max_exemplars", 0))
         reranker._ce = CrossEncoder(str(directory / "ce"), device=device)
         reranker.exemplars = {int(c): ex for c, ex in config["exemplars"].items()}
         return reranker
