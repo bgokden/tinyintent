@@ -21,8 +21,14 @@ def _blend_confidence(stage1: np.ndarray, ce_by_label: np.ndarray) -> np.ndarray
     mass the head puts on a label, and how well the query matches that label's
     exemplars. Multiplying them means a query has to satisfy both, which is
     what separates out-of-scope input -- it typically clears one and fails the
-    other. Measured on a held-out 8-intent set: 0.973 AUROC from the head
-    alone, 0.976 from the cross-encoder alone, 0.997 from the product.
+    other.
+
+    The gain is scale-dependent. On a held-out 8-intent set the product
+    separates in-scope from out-of-scope at 0.994 AUROC against 0.973 for the
+    head alone; on CLINC150's 150 intents and 1000 out-of-scope queries it is
+    0.970 against 0.968, so the cross-encoder adds almost nothing there. It
+    does not hurt at either scale, and it is free -- the scores come from the
+    reranker's existing forward pass.
 
     Labels the reranker never scored keep the head's probability unchanged.
     """

@@ -134,6 +134,10 @@ already cached:
 | 2 | 20 | 0.3 s | 5.8 s | **6.1 s** |
 | 4 | 60 | 0.2 s | 9.6 s | **9.8 s** |
 | 8 | 120 | 0.4 s | 15.9 s | **16.3 s** |
+| 150 | 3250 | ~3 s | ~8.4 min | **~8.5 min** |
+
+The last row is CLINC150 at 20 examples/intent — the realistic upper end. Small
+taxonomies train in seconds; a 150-intent one is a coffee break, not a job.
 
 Add roughly 5-10 s the first time in a process for loading `bge-large`, and a
 one-off download of ~1.3 GB the very first time on a machine.
@@ -148,10 +152,13 @@ Inference, same machine:
 | `IntentModel.load` | ~3 s |
 | saved model on disk | 92 MB |
 
-The reranker dominates inference: it runs the query against each candidate's
-exemplars, so cost grows with exemplars per intent. If you need sub-10 ms
-routing and can accept slightly weaker ranking, set `model.reranker = None`
-after loading — the linear head alone answers in ~3 ms.
+The reranker dominates inference: it runs the query against every exemplar of
+every candidate intent, so cost grows with examples per intent, not with the
+number of intents. On CLINC150 (150 intents, 20 examples each) it is 47 ms per
+utterance against 3 ms for the head alone — a 15x tax for +0.004 top-1 accuracy
+(0.951 vs 0.947). If you need sub-10 ms routing, set `model.reranker = None`
+after loading; you keep almost all the accuracy and all of the `confidence`
+signal.
 
 A CPU-only Linux box without MPS will be slower, roughly 2-3x on training, so
 treat these as a floor rather than a guarantee.
@@ -222,6 +229,16 @@ still produces a peaked `score`. On an 8-intent support model, *"what time do yo
 close on sundays"* scores **0.89** — indistinguishable from a real request. The
 same utterance has a `confidence` of **0.38**. Threshold `confidence`; compare
 `score` only against the other candidates.
+
+Separating in-scope from out-of-scope traffic (AUROC, higher is better):
+
+| | 8 intents, 30 OOS | CLINC150: 150 intents, 1000 OOS |
+|---|---:|---:|
+| `score` | 0.874 | 0.776 |
+| `confidence` | 0.994 | 0.970 |
+
+The gap widens with more intents, because more candidates means more
+renormalisation. `confidence` holds up at both scales.
 
 `conversation_agent.py` uses the relative signal as a gate (`MIN_SCORE` /
 `MIN_MARGIN`): when the best edge is too weak *against its rivals*, the agent
