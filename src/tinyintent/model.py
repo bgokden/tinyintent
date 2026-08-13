@@ -14,6 +14,12 @@ from tinyintent.reranker import CrossEncoderReranker
 from tinyintent.scorer import LinearScorer
 
 
+# Saved-artefact format. Bump when a change makes an older tinyintent read a
+# newer model incorrectly; adding an optional field does not require a bump.
+#   1 -- encoder, label_names, reranker (+ oos_threshold, optional)
+FORMAT_VERSION = 1
+
+
 def _check_trainable(examples: list[Example], label_names: list[str]) -> None:
     """Fail with a message about intents, not about solvers.
 
@@ -368,6 +374,7 @@ class IntentModel:
         (directory / "config.json").write_text(
             json.dumps(
                 {
+                    "format_version": FORMAT_VERSION,
                     "encoder": self.encoder.spec(),
                     "label_names": self.label_names,
                     "reranker": self.reranker is not None,
@@ -381,6 +388,18 @@ class IntentModel:
     def load(cls, directory: str | Path) -> "IntentModel":
         directory = Path(directory)
         config = json.loads((directory / "config.json").read_text(encoding="utf-8"))
+
+        # Artefacts written before versioning existed have no key and are
+        # format 1; they load unchanged because every field added since is
+        # optional. A newer major means fields we cannot interpret, so refuse
+        # rather than load a model that silently behaves differently.
+        version = int(config.get("format_version", 1))
+        if version > FORMAT_VERSION:
+            raise ValueError(
+                f"model at {directory} is format version {version}, but this "
+                f"tinyintent understands up to {FORMAT_VERSION}; upgrade the "
+                "package to load it"
+            )
 
         model = cls(
             make_encoder(config["encoder"]),
