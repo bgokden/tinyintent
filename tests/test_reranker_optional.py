@@ -11,25 +11,28 @@ import numpy as np
 import pytest
 
 from tinyintent import Example, IntentModel
+from tinyintent.encoder import HashingEncoder
 from tinyintent.cli import build_parser
 
 from test_model import make_data  # tests/ is on sys.path
 
 
 class StubSentenceEncoder:
-    """Keyword-separable embeddings without touching the network."""
+    """Keyword-separable embeddings without touching the network.
+
+    Delegates to HashingEncoder rather than bucketing with the built-in
+    ``hash()``: string hashing is salted per process, so the embeddings -- and
+    with them the fitted threshold -- changed between runs. That made this file
+    fail roughly one run in six.
+    """
 
     def __init__(self, model_name="stub", device=None):
         self.model_name = model_name
-        self.dim = 16
+        self._inner = HashingEncoder(dim=256)
+        self.dim = self._inner.dim
 
     def encode(self, texts):
-        out = np.zeros((len(texts), self.dim), dtype=np.float32)
-        for row, text in enumerate(texts):
-            for token in text.lower().split():
-                out[row, hash(token) % self.dim] += 1.0
-        norms = np.maximum(np.linalg.norm(out, axis=1, keepdims=True), 1e-8)
-        return out / norms
+        return self._inner.encode(texts)
 
     def spec(self):
         return {"kind": "sentence-transformers", "model": self.model_name}
