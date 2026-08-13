@@ -10,15 +10,25 @@ def cmd_train(args: argparse.Namespace) -> None:
     data = load_jsonl(args.data)
     model = IntentModel.fit(data)
     print(f"Trained on {len(data)} examples, {len(model.label_names)} intents")
+    if model.oos_threshold is None:
+        print("No 'oos' examples: the model will always decide. Add some to "
+              "enable abstention.")
+    else:
+        print(f"Abstains below confidence {model.oos_threshold:.3f}")
     model.save(args.out)
     print(f"Saved model to {args.out}")
 
 
 def cmd_evaluate(args: argparse.Namespace) -> None:
     model = IntentModel.load(args.model)
-    report = model.evaluate(load_jsonl(args.data))
+    data = load_jsonl(args.data)
+    report = model.evaluate(data)
     for key, value in report.as_dict().items():
         print(f"  {key}: {value}")
+    rejected = model.oos_rejection_rate(data)
+    if rejected is not None:
+        # evaluate() scores in-scope only, so this is the half it cannot see.
+        print(f"  oos_rejection_rate: {rejected:.3f}")
     print()
     print(report.table())
 
@@ -26,7 +36,9 @@ def cmd_evaluate(args: argparse.Namespace) -> None:
 def _show(text: str, model: IntentModel) -> None:
     p = model.predict(text)
     print(f"\n> {text}")
-    print(f"  intent: {p.intent}  ({p.score:.2f})")
+    flag = "  ABSTAIN (below threshold)" if p.abstain else ""
+    print(f"  intent: {p.intent}  (score {p.score:.2f}, "
+          f"confidence {p.confidence:.2f}){flag}")
     runners = ", ".join(f"{l} {s:.2f}" for l, s in p.ranking[1:3])
     if runners:
         print(f"  runners-up: {runners}")

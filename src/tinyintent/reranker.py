@@ -83,9 +83,16 @@ class CrossEncoderReranker:
     def fit(self, texts, y, vectors, epochs: int = 3, n_pos: int = 8, n_neg: int = 8,
             hard_neg: bool = True, near_m: int = 10, batch_size: int = 32,
             seed: int = 0) -> "CrossEncoderReranker":
+        import torch
         from sentence_transformers import InputExample
         from sentence_transformers.cross_encoder import CrossEncoder
         from torch.utils.data import DataLoader
+
+        # ``seed`` has to cover the whole training run, not just pair sampling:
+        # the re-headed classifier is randomly initialised and the loader
+        # shuffles, both off the global torch RNG. Seeding only _make_pairs
+        # left fit() non-reproducible across runs with identical inputs.
+        torch.manual_seed(seed)
 
         y = np.asarray(y)
         pairs, targets = _make_pairs(texts, y, vectors, n_pos, n_neg,
@@ -94,7 +101,9 @@ class CrossEncoderReranker:
         self._ce = CrossEncoder(self.base_model, num_labels=1,
                                 model_kwargs={"ignore_mismatched_sizes": True})
         examples = [InputExample(texts=p, label=t) for p, t in zip(pairs, targets)]
-        loader = DataLoader(examples, batch_size=batch_size, shuffle=True)
+        generator = torch.Generator().manual_seed(seed)
+        loader = DataLoader(examples, batch_size=batch_size, shuffle=True,
+                            generator=generator)
         self._ce.fit(train_dataloader=loader, epochs=epochs,
                      warmup_steps=int(0.1 * len(loader)), show_progress_bar=False)
 
@@ -111,29 +120,69 @@ class CrossEncoderReranker:
         highest); every other label gets 0. This is a single, consistent
         confidence: argmax is the decision and the top-minus-runner-up margin
         is always non-negative.
+
+        Because it is normalised, it ranks but does not calibrate -- see
+        :meth:`rerank_with_ce` for the unnormalised signal that does.
+        """
+
+        return self.rerank_with_ce(query_texts, stage1)[0]
+
+    def raw_ce_by_label(self, query_texts: list[str], stage1: np.ndarray,
+                        exclude_self: bool = False) -> np.ndarray:
+        """Unnormalised cross-encoder match per candidate label.
+
+        ``[n, n_labels]``, holding the mean of the best three exemplar scores
+        for each of stage-1's top-k candidates and ``-inf`` for the rest. This
+        is the magnitude that :meth:`rerank_scores` standardises away: a query
+        matching nothing in the training data scores low against every label,
+        which is exactly the signal abstention needs.
+
+        ``exclude_self`` drops exemplars identical to the query, for scoring
+        training text without it matching itself.
+        """
+
+        n, n_labels = stage1.shape
+        k = min(self.k, n_labels)
+        order = np.argsort(-stage1, axis=1)[:, :k]
+
+        pairs, meta = [], []
+        for i in range(n):
+            for j, lab in enumerate(order[i]):
+                for ex in self.exemplars.get(int(lab), []):
+                    if exclude_self and ex == query_texts[i]:
+                        continue
+                    pairs.append([query_texts[i], ex])
+                    meta.append((i, j))
+
+        ce_by_label = np.full((n, n_labels), -np.inf)
+        if not pairs:
+            return ce_by_label
+
+        raw = np.asarray(self._ce.predict(pairs, batch_size=256, show_progress_bar=False))
+        grouped: dict[tuple[int, int], list[float]] = {}
+        for (i, j), s in zip(meta, raw):
+            grouped.setdefault((i, j), []).append(float(s))
+        for (i, j), vals in grouped.items():
+            top = sorted(vals, reverse=True)[:3]          # mean of top-3 exemplars
+            ce_by_label[i, int(order[i, j])] = sum(top) / len(top)
+        return ce_by_label
+
+    def rerank_with_ce(self, query_texts: list[str], stage1: np.ndarray):
+        """``(ranking_scores, raw_ce_by_label)`` from a single pass.
+
+        Both come out of the same cross-encoder call, so asking for the
+        calibratable signal alongside the ranking costs nothing extra.
         """
 
         n, n_labels = stage1.shape
         k = min(self.k, n_labels)
         order = np.argsort(-stage1, axis=1)[:, :k]        # top-k label indices per row
 
-        pairs, meta = [], []
-        for i in range(n):
-            for j, lab in enumerate(order[i]):
-                for ex in self.exemplars.get(int(lab), []):
-                    pairs.append([query_texts[i], ex])
-                    meta.append((i, j))
-        if not pairs:
-            return stage1
-
-        raw = np.asarray(self._ce.predict(pairs, batch_size=256, show_progress_bar=False))
-        grouped: dict[tuple[int, int], list[float]] = {}
-        for (i, j), s in zip(meta, raw):
-            grouped.setdefault((i, j), []).append(float(s))
-        ce_score = np.full((n, k), -1e9)
-        for (i, j), vals in grouped.items():
-            top = sorted(vals, reverse=True)[:3]          # mean of top-3 exemplars
-            ce_score[i, j] = sum(top) / len(top)
+        ce_by_label = self.raw_ce_by_label(query_texts, stage1)
+        if not np.isfinite(ce_by_label).any():
+            return stage1, ce_by_label
+        ce_score = np.take_along_axis(ce_by_label, order, axis=1)
+        ce_score[~np.isfinite(ce_score)] = -1e9
 
         cand_scores = np.take_along_axis(stage1, order, axis=1)
         s1z = _zscore_rows(np.log(np.clip(cand_scores, 1e-12, None)))
@@ -144,7 +193,7 @@ class CrossEncoderReranker:
         probs = exps / exps.sum(axis=1, keepdims=True)    # softmax over the k candidates
         conf = np.zeros_like(stage1, dtype=float)         # non-candidates -> 0
         np.put_along_axis(conf, order, probs, axis=1)
-        return conf
+        return conf, ce_by_label
 
     def save(self, directory: str | Path) -> None:
         directory = Path(directory)

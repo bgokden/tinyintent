@@ -15,4 +15,49 @@ jobs:
       - name: Install
         run: uv sync
       - name: Test
-        run: uv run pytest -q
+        run: uv run pytest -q -m "not slow"
+
+  # The 0.1.0 dependency bug was invisible to the job above: `uv sync` installs
+  # the dev group, so a dev-only `datasets` looked fine. This job installs the
+  # built wheel the way PyPI users do -- no dev group, no editable source tree --
+  # and imports what fit() needs. It downloads no models, so it stays fast.
+  clean-install:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+      - name: Build wheel
+        run: uv build --wheel
+      - name: Install wheel into a bare environment
+        run: |
+          uv venv /tmp/clean
+          VIRTUAL_ENV=/tmp/clean uv pip install dist/*.whl
+      - name: Imports required by IntentModel.fit() must resolve
+        run: |
+          VIRTUAL_ENV=/tmp/clean uv run --no-project python -c "
+          import datasets, accelerate, sentence_transformers, sklearn, numpy
+          from tinyintent import IntentModel, load_jsonl
+          print('clean install OK')
+          "
+
+  # Real fit(): downloads bge-large and trains a reranker, so it is kept off the
+  # per-push path. This is the path users run and the one that had no coverage.
+  integration:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+      - name: Cache Hugging Face models
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-${{ runner.os }}-bge-large-minilm
+      - name: Install
+        run: uv sync
+      - name: Integration tests
+        run: uv run pytest -q -m slow
