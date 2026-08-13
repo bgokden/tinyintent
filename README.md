@@ -174,7 +174,7 @@ that cost is bounded rather than growing with your training set. On CLINC150
 
 Capping costs two queries in 1200 and *improves* abstention — fewer exemplars
 mean fewer chances for an unrelated query to match one of them by accident.
-Tune with `CrossEncoderReranker(max_exemplars=...)`; 0 keeps everything.
+Tune with `IntentModel.fit(data, max_exemplars=...)`; 0 keeps everything.
 
 Against the head alone:
 
@@ -191,8 +191,11 @@ a genuine trade, so it is a flag rather than a fixed choice:
 model = IntentModel.fit(data, reranker=False)   # or: tinyintent train --no-reranker
 ```
 
-`confidence` and abstention work identically either way. You can also drop it
-from an already-trained model with `model.reranker = None`.
+Abstention is fitted for both configurations at training time, so it keeps
+working either way — you can drop the reranker from an already-trained model
+with `model.reranker = None` and `abstain` stays calibrated. Note that
+`confidence` is on a different scale in each mode, so a threshold you hardcoded
+yourself needs re-checking; `oos_threshold` handles this for you.
 
 A CPU-only Linux box without MPS will be slower, roughly 2-3x on training, so
 treat these as a floor rather than a guarantee.
@@ -255,7 +258,7 @@ agent [BOOKED]: Fantastic, you're all set...
 | field | what it measures | gate on it for |
 |---|---|---|
 | `score` | the reranked softmax over the top candidates; `ranking` is ordered by it, so the top is always the decision and the margin to the runner-up is non-negative | **which** intent, and how close the call was between candidates |
-| `confidence` | the linear head's unnormalised probability for the chosen intent | **whether any** intent fits at all |
+| `confidence` | the linear head's unnormalised probability for the chosen intent, multiplied by how well the query matches that intent's exemplars when a reranker is attached | **whether any** intent fits at all |
 
 `score` is normalised across the candidates, so it always sums to 1 over them.
 That makes it a good relative signal and a poor absolute one: out-of-scope input
@@ -450,7 +453,8 @@ file changes and ship `model/` alongside your app.
 Load once at startup, not per request (`load` costs ~3 s). `predict_batch` is
 substantially cheaper per utterance than looping over `predict`. If you need
 sub-10 ms and can accept slightly weaker ranking, drop the reranker with
-`model.reranker = None`.
+`model.reranker = None` — `abstain` stays calibrated, because both thresholds
+are fitted at training time.
 
 ### What it is not for
 

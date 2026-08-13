@@ -38,6 +38,14 @@ class StubReranker:
     def rerank_scores(self, query_texts, stage1):
         return self.rerank_with_ce(query_texts, stage1)[0]
 
+    def save(self, directory):
+        import json
+        from pathlib import Path
+
+        directory = Path(directory)
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "stub.json").write_text(json.dumps({"stub": True}))
+
 
 def fitted_model(dim=1024):
     data = make_data(n=14)
@@ -183,7 +191,8 @@ def test_model_saved_before_abstention_loads_with_none(tmp_path):
     model.save(tmp_path / "m")
     config_path = tmp_path / "m" / "config.json"
     config = json.loads(config_path.read_text())
-    del config["oos_threshold"]
+    del config["oos_threshold"]           # pre-abstention artifacts have
+    del config["oos_threshold_stage1"]    # neither cut
     config_path.write_text(json.dumps(config))
 
     reloaded = IntentModel.load(tmp_path / "m")
@@ -196,3 +205,63 @@ def test_evaluate_still_ignores_oos_but_rejection_rate_reports_it():
     report = model.evaluate(data)
     assert report.accuracy >= 0.9                     # in-scope only, as documented
     assert model.oos_rejection_rate(data) is not None  # the number evaluate() omits
+
+
+def test_toggling_the_reranker_off_keeps_abstention_working():
+    """The bug: one threshold cannot serve two confidence scales.
+
+    `confidence` blends the head's probability with the cross-encoder match
+    when a reranker is attached, and the blend is strictly smaller because it
+    multiplies by a sigmoid. Applying the blended cut to bare stage-1
+    confidences let every out-of-scope query through -- measured 95% rejection
+    to 0% -- the moment `model.reranker = None` was set, which the docs
+    recommend for latency.
+    """
+    model, data = fitted_model()
+    model.reranker = StubReranker()          # halves confidence via sigmoid(0)
+    model.fit_oos_threshold(data)
+
+    reranked_rate = model.oos_rejection_rate(data)
+    reranked_cut = model.oos_threshold
+
+    model.reranker = None
+    stage1_rate = model.oos_rejection_rate(data)
+
+    assert reranked_cut != model.oos_threshold, (
+        "the two confidence scales must not share one cut"
+    )
+    assert stage1_rate >= 0.8, (
+        f"abstention collapsed to {stage1_rate:.0%} when the reranker was "
+        "removed; it must keep working"
+    )
+    assert reranked_rate >= 0.8
+
+
+def test_both_cuts_survive_save_load(tmp_path):
+    model, data = fitted_model()
+    model.reranker = StubReranker()
+    model.fit_oos_threshold(data)
+    model.save(tmp_path / "m")
+
+    # The stub cannot be rebuilt by load(), so read the config back directly
+    # and re-attach it; the point is that both cuts round-trip.
+    import json
+    config = json.loads((tmp_path / "m" / "config.json").read_text())
+    config["reranker"] = False
+    (tmp_path / "m" / "config.json").write_text(json.dumps(config))
+
+    reloaded = IntentModel.load(tmp_path / "m")
+    reloaded.reranker = StubReranker()
+    assert np.isclose(reloaded.oos_threshold, model.oos_threshold)
+
+    reloaded.reranker = None
+    model.reranker = None
+    assert np.isclose(reloaded.oos_threshold, model.oos_threshold)
+
+
+def test_setting_oos_threshold_by_hand_applies_to_both_scales():
+    model, _ = fitted_model()
+    model.oos_threshold = 0.42
+    assert model.oos_threshold == 0.42
+    model.reranker = StubReranker()
+    assert model.oos_threshold == 0.42

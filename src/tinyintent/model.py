@@ -129,13 +129,43 @@ class IntentModel:
         # Fitted from ``oos`` examples when the training data contains them;
         # ``None`` means no abstention signal was learned and the model always
         # decides. Compared against Prediction.confidence, never .score.
-        self.oos_threshold: float | None = None
+        # One per confidence scale -- see the ``oos_threshold`` property.
+        self._oos_threshold_reranked: float | None = None
+        self._oos_threshold_stage1: float | None = None
         self._train_vectors: np.ndarray | None = None
         self._train_y: np.ndarray | None = None
         self._train_texts: list[str] = []
 
     def _embed(self, texts: list[str]) -> np.ndarray:
         return self.encoder.encode(texts)
+
+    @property
+    def oos_threshold(self) -> float | None:
+        """The abstention cut for however this model is currently configured.
+
+        ``confidence`` is measured on a different scale depending on whether a
+        reranker is attached, so the matching cut is selected rather than
+        stored once. Turning the reranker off after training therefore keeps
+        abstention working instead of silently disabling it.
+
+        Models saved before both cuts existed only have the reranked one; it is
+        reused rather than leaving the model unable to abstain at all.
+        """
+
+        if self.reranker is None:
+            return (self._oos_threshold_stage1
+                    if self._oos_threshold_stage1 is not None
+                    else self._oos_threshold_reranked)
+        return (self._oos_threshold_reranked
+                if self._oos_threshold_reranked is not None
+                else self._oos_threshold_stage1)
+
+    @oos_threshold.setter
+    def oos_threshold(self, value: float | None) -> None:
+        """Set both cuts at once; for overriding a fitted threshold by hand."""
+
+        self._oos_threshold_reranked = value
+        self._oos_threshold_stage1 = value
 
     # -- training -----------------------------------------------------------
 
@@ -163,7 +193,7 @@ class IntentModel:
 
     @classmethod
     def fit(cls, examples: list[Example], device: str | None = None,
-            reranker: bool = True) -> "IntentModel":
+            reranker: bool = True, max_exemplars: int = 6) -> "IntentModel":
         """Train the pipeline: bge-large + linear head, plus the reranker.
 
         Examples labelled ``oos`` do not become a class -- they are held out of
@@ -175,28 +205,37 @@ class IntentModel:
 
         ``reranker=False`` trains the encoder and linear head only. It is a
         real trade, not a degraded mode -- on CLINC150 (150 intents, 20
-        examples each) the reranker is worth +0.004 top-1 accuracy, 0.951
-        against 0.947, and costs roughly 15x inference latency (47 ms against
-        3 ms per utterance) plus the bulk of training time. ``confidence`` and
-        abstention work either way. Skip it when latency or training time
-        matters more than the last fraction of a point.
+        examples each) the reranker is worth +0.007 top-1 accuracy, 0.954
+        against 0.947, and costs roughly 5x inference latency (16 ms against
+        3 ms per utterance) plus the bulk of training time. Abstention is
+        fitted for both configurations, so it keeps working either way. Skip
+        the reranker when latency or training time matters more than the last
+        fraction of a point.
+
+        ``max_exemplars`` bounds how many utterances per intent the reranker
+        scores against, which is what sets its inference cost; 0 keeps all of
+        them.
         """
 
         model = cls._fit_base(examples, SentenceEncoder(device=device))
         if reranker:
-            model.reranker = CrossEncoderReranker(device=device).fit(
-                model._train_texts, model._train_y, model._train_vectors
-            )
+            model.reranker = CrossEncoderReranker(
+                device=device, max_exemplars=max_exemplars
+            ).fit(model._train_texts, model._train_y, model._train_vectors)
         model.fit_oos_threshold(examples)
         return model
 
-    def _out_of_fold_confidence(self, n_splits: int = 5) -> np.ndarray:
+    def _out_of_fold_confidence(self, n_splits: int = 5,
+                                use_reranker: bool = True) -> np.ndarray:
         """In-scope confidences as they look on *unseen* text.
 
         Scoring the training examples with the head that was fitted on them
         gives near-1.0 confidences, which drags any threshold derived from them
         far above where real traffic sits. Cross-fitting gives each training
         example a confidence from a head that never saw it.
+
+        ``use_reranker=False`` returns the head's probability alone, which is
+        the scale ``confidence`` uses when no reranker is active.
         """
 
         from sklearn.model_selection import StratifiedKFold
@@ -217,7 +256,7 @@ class IntentModel:
                 self._train_vectors[test_idx]
             )
 
-        if self.reranker is None:
+        if self.reranker is None or not use_reranker:
             return out_of_fold_stage1.max(axis=1)
 
         # Same blend predict() uses, or the threshold would be fitted on a
@@ -249,30 +288,47 @@ class IntentModel:
 
         oos_texts = [ex.text for ex in examples if ex.label == OOS_LABEL]
         if not oos_texts or self._train_vectors is None or not len(self._train_y):
-            self.oos_threshold = None
+            self._oos_threshold_reranked = None
+            self._oos_threshold_stage1 = None
             return None
 
-        pos = self._out_of_fold_confidence()
-        # OOS examples are never trained on, so these need no cross-fitting.
-        neg = self._scores(oos_texts)[1].max(axis=1)
+        def place_cut(pos: np.ndarray, neg: np.ndarray) -> float:
+            # Place the cut from the negative side. The positives are training
+            # data: cross-fitting removes the linear head's memory of them, but
+            # the cross-encoder was still trained on these very texts, so their
+            # blended confidences stay optimistic. Fitting the cut to them --
+            # by balanced accuracy, or by a low positive quantile -- lands too
+            # high and abstained on 19-27% of genuine held-out traffic. The
+            # negatives were never trained on, so their distribution is honest.
+            cut = min(
+                np.quantile(neg, oos_quantile),
+                np.quantile(pos, max_inscope_abstain),  # safety rail only
+            )
+            # Nudge above the quantile so examples sitting exactly on it count
+            # as rejected: `abstain` tests `confidence < threshold`, and a
+            # degenerate negative distribution (identical confidences, common
+            # with a coarse encoder or duplicated oos text) otherwise lands the
+            # cut on the mass itself and abstains on none of it.
+            return float(np.nextafter(cut, np.inf))
 
-        # Place the cut from the negative side. The positives are training data:
-        # cross-fitting removes the linear head's memory of them, but the
-        # cross-encoder was still trained on these very texts, so their blended
-        # confidences stay optimistic. Fitting the cut to them -- by balanced
-        # accuracy, or by a low positive quantile -- lands too high and
-        # abstained on 19-27% of genuine held-out traffic. The negatives were
-        # never trained on, so their distribution is honest.
-        cut = min(
-            np.quantile(neg, oos_quantile),
-            np.quantile(pos, max_inscope_abstain),      # safety rail only
+        # Two scales, two cuts. `confidence` is the head's probability blended
+        # with the cross-encoder match when a reranker is active and the bare
+        # probability when it is not -- and the blend is strictly smaller, since
+        # it multiplies by a sigmoid. One threshold cannot serve both: applying
+        # the blended cut to bare stage-1 confidences let every out-of-scope
+        # query through (95% rejected -> 0%) the moment someone set
+        # `model.reranker = None`, which the docs recommend for latency.
+        oos_vectors = self._embed(oos_texts)
+        self._oos_threshold_stage1 = place_cut(
+            self._out_of_fold_confidence(use_reranker=False),
+            self.scorer.scores(oos_vectors).max(axis=1),
         )
-        # Nudge above the quantile so examples sitting exactly on it count as
-        # rejected: `abstain` tests `confidence < threshold`, and a degenerate
-        # negative distribution (identical confidences, common with a coarse
-        # encoder or duplicated oos text) otherwise lands the cut on the mass
-        # itself and abstains on none of it.
-        self.oos_threshold = float(np.nextafter(cut, np.inf))
+        self._oos_threshold_reranked = None
+        if self.reranker is not None:
+            self._oos_threshold_reranked = place_cut(
+                self._out_of_fold_confidence(use_reranker=True),
+                self._scores(oos_texts, oos_vectors)[1].max(axis=1),
+            )
         return self.oos_threshold
 
     # -- inference ----------------------------------------------------------
@@ -392,7 +448,10 @@ class IntentModel:
                     "encoder": self.encoder.spec(),
                     "label_names": self.label_names,
                     "reranker": self.reranker is not None,
-                    "oos_threshold": self.oos_threshold,
+                    # Kept under the original key so an older tinyintent reads
+                    # exactly what it used to; the stage-1 cut is additive.
+                    "oos_threshold": self._oos_threshold_reranked,
+                    "oos_threshold_stage1": self._oos_threshold_stage1,
                 }
             ),
             encoding="utf-8",
@@ -429,8 +488,11 @@ class IntentModel:
         if config.get("reranker"):
             model.reranker = CrossEncoderReranker.load(directory / "reranker",
                                                        device=device)
-        # Absent in models saved before abstention existed -> always decide.
-        model.oos_threshold = config.get("oos_threshold")
+        # Both absent in models saved before abstention existed -> always
+        # decide. Only the reranked one is present in models saved before the
+        # two scales were separated; the property falls back to it.
+        model._oos_threshold_reranked = config.get("oos_threshold")
+        model._oos_threshold_stage1 = config.get("oos_threshold_stage1")
 
         train = np.load(directory / "train.npz")
         model._train_vectors = train["vectors"].astype(np.float32)
