@@ -1,6 +1,6 @@
 [project]
 name = "tinyintent"
-version = "0.1.0"
+version = "0.1.1"
 description = "A small, portable intent classifier: frozen bge-large embeddings, a linear head, and a trained cross-encoder reranker"
 readme = "README.md"
 requires-python = ">=3.11"
