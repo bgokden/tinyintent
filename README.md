@@ -114,15 +114,34 @@ options are the ones with a real trade-off behind them: `reranker=False`
 
 ## Accuracy
 
-Top-1 accuracy, few-shot (20 examples/intent), averaged over seeds:
+Top-1 accuracy, few-shot (20 examples/intent), averaged over 2 seeds:
 
-| dataset | accuracy |
-|---|---:|
-| CLINC150 | 0.975 |
-| Banking77 | 0.915 |
+| dataset | official test split | train-pool holdout |
+|---|---:|---:|
+| CLINC150 (150 intents) | **0.960** | 0.973 |
+| Banking77 (77 intents) | **0.910** | 0.907 |
 
-Banking77's intents overlap heavily, so it is the harder ceiling; CLINC150 is
-near-saturated. Reproduce with `uv run python scripts/benchmark.py`.
+The two columns are different questions, and the difference is large enough on
+CLINC150 to be worth stating:
+
+- **official test split** — trained on 20 examples per intent from the train
+  split, scored on the dataset's own test split: text collected separately from
+  anything the model saw. This is what published CLINC150 and Banking77 numbers
+  mean, so it is the figure to compare against other systems.
+- **train-pool holdout** — scored on the *next* 20 examples per intent from the
+  same train split. Easier, because the held-out slice comes from the same
+  collection pass as the training text, and it flatters CLINC150 by ~0.013.
+
+Banking77 lands in the same place either way (0.910 vs 0.907), so its intents
+are the harder ceiling regardless of how you slice it — they overlap heavily.
+CLINC150 is closer to saturated.
+
+Both columns come from one training run per seed, scored twice. Reproduce with
+`uv run python scripts/benchmark.py`.
+
+Neither number says anything about out-of-scope input: `accuracy` and
+`evaluate` score in-scope examples only, and these benchmark splits contain no
+`oos` data. For that, see `confidence` and `oos_rejection_rate` below.
 
 ## How long training takes
 
