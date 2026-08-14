@@ -46,7 +46,11 @@ jobs:
   # per-push path. This is the path users run and the one that had no coverage.
   integration:
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
+    # Reads the default branch rather than naming it: this repo's is `master`,
+    # and a hardcoded `main` silently skipped this job on every push to it.
+    if: >-
+      github.event_name == 'pull_request' ||
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
