@@ -57,7 +57,7 @@ Bring your own `intents.jsonl` (see [Data format](#data-format)), or start from
 only, not the example data:
 
 ```bash
-curl -O https://raw.githubusercontent.com/bgokden/tinyintent/main/examples/commerce_intents.jsonl
+curl -O https://raw.githubusercontent.com/bgokden/tinyintent/master/examples/commerce_intents.jsonl
 mv commerce_intents.jsonl intents.jsonl
 ```
 
