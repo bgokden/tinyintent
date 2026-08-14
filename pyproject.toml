@@ -29,7 +29,17 @@ classifiers = [
 dependencies = [
     "numpy>=2.0",
     "scikit-learn>=1.5",
-    "sentence-transformers>=3.0",
+    # Upper bound: fit() drives the reranker through CrossEncoder.fit(
+    # train_dataloader=...), sentence-transformers' deprecated v2 compatibility
+    # shim. It survives 3.x-5.x but is not a stable target, so a new major has
+    # to be tested before it is allowed in.
+    "sentence-transformers>=3.0,<6",
+    # Runtime, not dev: IntentModel.fit() always trains the cross-encoder
+    # reranker, and on sentence-transformers >=4 that path routes through
+    # CrossEncoderTrainer, which needs both of these. Without them the
+    # documented quickstart raises ImportError on a clean install.
+    "datasets>=2.0",
+    "accelerate>=1.1.0",
 ]
 
 [project.urls]
@@ -48,7 +58,13 @@ build-backend = "hatchling.build"
 packages = ["src/tinyintent"]
 
 [dependency-groups]
+# `datasets` deliberately does NOT belong here: it is needed at runtime by
+# fit(). Having it dev-only is what let the broken 0.1.0 release pass CI.
 dev = [
-    "datasets>=5.0.1",
     "pytest>=9.1.1",
+]
+
+[tool.pytest.ini_options]
+markers = [
+    "slow: exercises the real fit() path and downloads models from the HF Hub",
 ]

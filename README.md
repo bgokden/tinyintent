@@ -2,7 +2,8 @@
 
 A small, portable intent classifier. Give it a few labelled utterances per
 intent; it maps text to the single best intent on CPU, with no LLM in the loop.
-One opinionated pipeline, no knobs to turn.
+One opinionated pipeline: sensible defaults, and knobs only where the trade-off
+is real.
 
 ```
 utterance
@@ -14,7 +15,15 @@ utterance
 
 ## Install
 
-Requires [uv](https://docs.astral.sh/uv/). To use it in your own project:
+From PyPI, with [uv](https://docs.astral.sh/uv/) or pip:
+
+```bash
+uv add tinyintent
+# or
+pip install tinyintent
+```
+
+Latest from git:
 
 ```bash
 uv add "git+https://github.com/bgokden/tinyintent"
@@ -24,9 +33,33 @@ Or clone and set up for development:
 
 ```bash
 uv sync
+uv run pytest -q -m "not slow"   # add -m slow for the end-to-end training tests
 ```
 
+Python 3.11+. Everything runs on CPU — no GPU, no API key, no LLM. Installing
+pulls in torch, sentence-transformers, datasets and accelerate (training the
+reranker needs the last two), so expect a few hundred MB of wheels.
+
+The models are downloaded on first `fit()`, not at install time:
+
+| model | role | size |
+|---|---|---|
+| `BAAI/bge-large-en-v1.5` | frozen sentence encoder | ~1.2 GB |
+| `cross-encoder/ms-marco-MiniLM-L-6-v2` | reranker starting point | ~88 MB |
+
+They are cached in `~/.cache/huggingface`, so only the first run pays for it. In
+CI or a container, cache that directory or the download repeats on every build.
+
 ## Quickstart (CLI)
+
+Bring your own `intents.jsonl` (see [Data format](#data-format)), or start from
+`examples/commerce_intents.jsonl` in this repo — the wheel ships the library
+only, not the example data:
+
+```bash
+curl -O https://raw.githubusercontent.com/bgokden/tinyintent/master/examples/commerce_intents.jsonl
+mv commerce_intents.jsonl intents.jsonl
+```
 
 ```bash
 uv run tinyintent train --data intents.jsonl --out model
@@ -34,12 +67,27 @@ uv run tinyintent predict --model model "cancel my order"
 uv run tinyintent evaluate --model model --data intents.jsonl
 ```
 
+Real output from those three commands on that file:
+
 ```
-> put my motorcycle up for sale
-  intent: sell  (0.87)
-  runners-up: buy 0.04, rent 0.04
-  nearest example: "list my bike for sale" (0.84)
+Trained on 53 examples, 6 intents (encoder + head + reranker)
+Abstains below confidence 0.100
+Saved model to model
+
+> cancel my order
+  intent: cancel_order  (score 0.86, confidence 0.81)
+  runners-up: refund 0.07, track_order 0.03
+  nearest example: "cancel my order" (1.00)
+
+> what is the weather in berlin
+  intent: rent  (score 0.56, confidence 0.00)  ABSTAIN (below threshold)
+  runners-up: track_order 0.28, buy 0.10
+  nearest example: "I want to rent an apartment downtown" (0.49)
 ```
+
+The second one is the reason there are two numbers. `score` says 0.56, which
+reads like a decision; `confidence` says 0.00, which correctly says nothing in
+this taxonomy fits a weather question.
 
 ## Quickstart (Python)
 
@@ -53,15 +101,25 @@ model.save("model")
 print(model.classify("I want my money back for order 883"))   # refund
 
 pred = model.predict("I want my money back for order 883")
-print(pred.intent, pred.score)      # refund 0.80
-print(pred.ranking[:3])             # ranked intents
-print(pred.explanation)             # nearest labelled example
+print(pred.intent, pred.confidence)  # refund 0.54  <- gate on this
+print(pred.score)                    # 0.79         <- ranks, does not calibrate
+print(pred.ranking[:3])              # [('refund', 0.79), ('cancel_order', 0.14), ...]
+print(pred.explanation)              # {'text': 'request a refund for order 883',
+                                     #  'similarity': 0.90}
+
+if pred.abstain:                     # set when trained with `oos` examples
+    ask_for_clarification()
+else:
+    route(pred.intent)
 ```
 
 ## How it works
 
 `IntentModel.fit(data)` trains three parts, and `classify`/`predict` run them
-in order. There are no options — this is the configuration that measured best.
+in order. The defaults are the configuration that measured best, so the only
+options are the ones with a real trade-off behind them: `reranker=False`
+(accuracy for latency), `device=` (where the models run), and
+`max_exemplars` (inference cost per query).
 
 - **Encoder** — a frozen `bge-large` sentence encoder. It won an encoder sweep
   on the intent benchmarks; nothing smaller matched it and fine-tuning it did
@@ -76,15 +134,110 @@ in order. There are no options — this is the configuration that measured best.
 
 ## Accuracy
 
-Top-1 accuracy, few-shot (20 examples/intent), averaged over seeds:
+Top-1 accuracy, few-shot (20 examples/intent), averaged over 2 seeds:
 
-| dataset | accuracy |
+| dataset | official test split | train-pool holdout |
+|---|---:|---:|
+| CLINC150 (150 intents) | **0.960** | 0.973 |
+| Banking77 (77 intents) | **0.910** | 0.907 |
+
+The two columns are different questions, and the difference is large enough on
+CLINC150 to be worth stating:
+
+- **official test split** — trained on 20 examples per intent from the train
+  split, scored on the dataset's own test split: text collected separately from
+  anything the model saw. This is what published CLINC150 and Banking77 numbers
+  mean, so it is the figure to compare against other systems.
+- **train-pool holdout** — scored on the *next* 20 examples per intent from the
+  same train split. Easier, because the held-out slice comes from the same
+  collection pass as the training text, and it flatters CLINC150 by ~0.013.
+
+Banking77 lands in the same place either way (0.910 vs 0.907), so its intents
+are the harder ceiling regardless of how you slice it — they overlap heavily.
+CLINC150 is closer to saturated.
+
+Both columns come from one training run per seed, scored twice. Reproduce with
+`uv run python scripts/benchmark.py`.
+
+Neither number says anything about out-of-scope input: `accuracy` and
+`evaluate` score in-scope examples only, and these benchmark splits contain no
+`oos` data. For that, see `confidence` and `oos_rejection_rate` below.
+
+## How long training takes
+
+Training is short because only the reranker is trained — the encoder is frozen
+and the linear head is a logistic regression that fits in well under a second.
+Cost scales with the number of *examples*, not the number of intents.
+
+Measured on an **Apple M5 (10 cores, 32 GB, macOS 26.2)**, CPU/MPS only, models
+already cached:
+
+| intents | examples | linear head | reranker | **total `fit()`** |
+|---:|---:|---:|---:|---:|
+| 2 | 20 | 0.3 s | 5.8 s | **6.1 s** |
+| 4 | 60 | 0.2 s | 9.6 s | **9.8 s** |
+| 8 | 120 | 0.4 s | 15.9 s | **16.3 s** |
+| 150 | 3250 | ~3 s | ~8.4 min | **~8.5 min** |
+
+The last row is CLINC150 at 20 examples/intent — the realistic upper end. Small
+taxonomies train in seconds; a 150-intent one is a coffee break, not a job.
+
+Add roughly 5-10 s the first time in a process for loading `bge-large`, and a
+one-off download of ~1.3 GB the very first time on a machine.
+
+Inference, same machine:
+
+| operation | latency |
 |---|---:|
-| CLINC150 | 0.975 |
-| Banking77 | 0.915 |
+| `predict` — one utterance | ~55 ms |
+| `predict_batch` — per utterance, batched | ~16 ms |
+| `predict_batch` — per utterance, reranker disabled | ~3 ms |
+| `IntentModel.load` | ~3 s |
+| saved model on disk | 92 MB |
 
-Banking77's intents overlap heavily, so it is the harder ceiling; CLINC150 is
-near-saturated. Reproduce with `uv run python scripts/benchmark.py`.
+The reranker dominates inference: it runs the query against every exemplar of
+every candidate intent, so cost grows with examples per intent, not with the
+number of intents.
+
+It scores against up to `max_exemplars` (default 6) exemplars per candidate, so
+that cost is bounded rather than growing with your training set. On CLINC150
+(150 intents, 20 examples each), varying the cap:
+
+| exemplars/intent | top-1 accuracy | OOS abstained | ms/utterance |
+|---:|---:|---:|---:|
+| 20 (uncapped) | 0.9558 | 0.803 | 47.0 |
+| 8 | 0.9525 | 0.837 | 20.7 |
+| **6 (default)** | **0.9542** | **0.845** | **16.4** |
+| 4 | 0.9542 | 0.875 | 12.0 |
+| 2 | 0.9508 | 0.895 | 7.4 |
+
+Capping costs two queries in 1200 and *improves* abstention — fewer exemplars
+mean fewer chances for an unrelated query to match one of them by accident.
+Tune with `IntentModel.fit(data, max_exemplars=...)`; 0 keeps everything.
+
+Against the head alone:
+
+| | with reranker | head only |
+|---|---:|---:|
+| CLINC150 top-1 accuracy | 0.954 | 0.947 |
+| inference, per utterance | 16 ms | 3 ms |
+| training, 3250 examples | ~8.5 min | ~3 s |
+
+Still a 5x latency tax and most of the training time for +0.007 accuracy. It is
+a genuine trade, so it is a flag rather than a fixed choice:
+
+```python
+model = IntentModel.fit(data, reranker=False)   # or: tinyintent train --no-reranker
+```
+
+Abstention is fitted for both configurations at training time, so it keeps
+working either way — you can drop the reranker from an already-trained model
+with `model.reranker = None` and `abstain` stays calibrated. Note that
+`confidence` is on a different scale in each mode, so a threshold you hardcoded
+yourself needs re-checking; `oos_threshold` handles this for you.
+
+A CPU-only Linux box without MPS will be slower, roughly 2-3x on training, so
+treat these as a floor rather than a guarantee.
 
 ## Agent tool routing
 
@@ -139,15 +292,36 @@ agent [CLOSE]: I'd love to book you a free 15-minute assessment. Shall I set tha
 agent [BOOKED]: Fantastic, you're all set...
 ```
 
-`predict` returns a **single confidence** (`Prediction.score`) — the reranked
-softmax over the top candidates — and `ranking` is ordered by that same number,
-so the top is always the decision and the margin to the runner-up is
-non-negative. That is what you gate on: confident transitions land around
-0.85-0.91; a genuinely ambiguous reply drops well below.
+`predict` returns two different numbers, and they answer different questions.
 
-`conversation_agent.py` uses it as a gate (`MIN_SCORE` / `MIN_MARGIN`): when the
-best edge is too weak, the agent **stays in the node** (a self-loop -- a normal
-FSM choice) and asks the caller to clarify, then routes cleanly next turn.
+| field | what it measures | gate on it for |
+|---|---|---|
+| `score` | the reranked softmax over the top candidates; `ranking` is ordered by it, so the top is always the decision and the margin to the runner-up is non-negative | **which** intent, and how close the call was between candidates |
+| `confidence` | the linear head's unnormalised probability for the chosen intent, multiplied by how well the query matches that intent's exemplars when a reranker is attached | **whether any** intent fits at all |
+
+`score` is normalised across the candidates, so it always sums to 1 over them.
+That makes it a good relative signal and a poor absolute one: out-of-scope input
+still produces a peaked `score`. On an 8-intent support model, *"what time do you
+close on sundays"* scores **0.89** — indistinguishable from a real request. The
+same utterance has a `confidence` of **0.38**. Threshold `confidence`; compare
+`score` only against the other candidates.
+
+Separating in-scope from out-of-scope traffic (AUROC, higher is better):
+
+| | 8 intents, 30 OOS | CLINC150: 150 intents, 1000 OOS |
+|---|---:|---:|
+| `score` | 0.874 | 0.776 |
+| `confidence` | 0.994 | 0.970 |
+
+The gap widens with more intents, because more candidates means more
+renormalisation. `confidence` holds up at both scales.
+
+`conversation_agent.py` uses the relative signal as a gate (`MIN_SCORE` /
+`MIN_MARGIN`): when the best edge is too weak *against its rivals*, the agent
+**stays in the node** (a self-loop -- a normal FSM choice) and asks the caller to
+clarify, then routes cleanly next turn. That is in-domain ambiguity, which is
+what `score` is good at. For "this caller is talking about something else
+entirely", use `confidence` or `abstain`.
 
 ```
 caller: 'well, it depends'        ->  [uncertain: question 0.43, margin 0.10]  STAY + clarify
@@ -189,13 +363,144 @@ returns it as a `Report`.
 ## Data format
 
 JSON Lines of `{"text", "label"}`. A handful of examples per intent is enough
-(10-20 works well). The reserved label `oos` marks out-of-scope examples; they
-are ignored during training and evaluation.
+(10-20 works well).
 
 ```json
 {"text": "cancel my order", "label": "cancel_order"}
 {"text": "what's the weather", "label": "oos"}
 ```
+
+The reserved label `oos` marks out-of-scope examples. They never become an
+intent — `fit` holds them out of the classifier and uses them to fit an
+abstention threshold on `confidence`, stored on the model as `oos_threshold`
+and saved with it. Predictions then come back with `abstain=True` when they
+fall below it:
+
+```python
+pred = model.predict("what time do you close on sundays")
+pred.intent      # still the best in-scope guess -- the model always decides
+pred.abstain     # True: below the fitted threshold, so don't act on it
+```
+
+Abstention is advisory: `predict` always returns an intent and a ranking, and
+the caller decides what to do. Without `oos` examples in the training data no
+threshold is fitted, `oos_threshold` is `None`, and `abstain` is always `False`.
+
+`evaluate()` reports in-scope accuracy only and never counts an out-of-scope
+mistake; pair it with `model.oos_rejection_rate(data)`, which is the fraction of
+`oos` examples the threshold catches.
+
+## Using it well
+
+### Write examples the way your users actually type
+
+The encoder generalises across wording, so you do not need to enumerate
+phrasings — you need to cover the *ways of asking*. Ten examples spanning
+direct requests, complaints, and questions beat forty rewordings of one
+sentence. Copy real utterances from logs where you can; invented data drifts
+toward how you write, not how your users do.
+
+Match the register too. If users type `where's my stuff`, do not train only on
+`I would like to enquire about my delivery`.
+
+**Watch for vocabulary you always include and users often omit.** A six-tool
+router trained with 12 examples per tool, where every `run_sql` example said
+*query*, *table* or *database* and every `send_email` example said *email* or
+*send*, routed both of these correctly but with confidence low enough to
+abstain:
+
+| utterance | intent | confidence |
+|---|---|---:|
+| `how many signups did we get yesterday` | run_sql ✓ | 0.05 |
+| `run a query for signups yesterday` | run_sql ✓ | 0.50 |
+| `let the vendor know we accept` | send_email ✓ | 0.06 |
+| `send the vendor an email saying we accept` | send_email ✓ | 0.75 |
+
+The intent was never wrong — the model was simply unsure, because nothing in
+training looked like a request that omits the tool's own name. Users phrase
+requests by *outcome* far more than by tool. Include those phrasings and the
+confidence follows.
+
+### 10-20 examples per intent, roughly balanced
+
+Below ~8 the linear head gets unstable; past ~30 the returns flatten and
+training slows. Keep intents within about 3x of each other in size — a class
+with 60 examples against classes with 10 will absorb the ambiguous cases.
+
+### Always include `oos` examples
+
+They cost one line each and are the difference between a router that says "I
+don't know" and one that confidently sends a weather question to your refunds
+tool. 20-50 works well. Make them *realistic* misses — the things people
+actually type at your bot — not absurdities:
+
+```json
+{"text": "do you ship to australia", "label": "oos"}
+{"text": "can i pay in monthly installments", "label": "oos"}
+```
+
+Near-misses like these teach the threshold where the real boundary is. Only
+`what's the weather` teaches it nothing, because that was never going to be
+confused.
+
+### Gate on `confidence`, rank on `score`
+
+The two answer different questions, and using the wrong one is the most common
+way to get burned:
+
+```python
+pred = model.predict(text)
+
+if pred.abstain:                      # or: pred.confidence < your_threshold
+    clarify()                         # nothing in scope fits
+elif pred.score - pred.ranking[1][1] < 0.15:
+    disambiguate(pred.ranking[:2])    # in scope, but two intents are close
+else:
+    route(pred.intent)
+```
+
+`score` is normalised across candidates, so it stays high even when nothing
+fits — it tells you *which* intent, never *whether*. `confidence` is
+unnormalised and drops for unfamiliar input.
+
+### Let the confusion report drive your data
+
+`model.evaluate(data)` gives per-intent precision/recall/F1. Low recall on one
+intent means it needs more examples; a pair that keeps swapping means the
+intents overlap conceptually. Two intents that persistently confuse are usually
+one intent plus a parameter — merge them and extract the difference downstream.
+
+Hold data out rather than scoring on the training set:
+
+```python
+from tinyintent import split
+train, test = split(data, test_frac=0.2, seed=0)
+model = IntentModel.fit(train)
+print(model.evaluate(test))
+print(model.oos_rejection_rate(test))
+```
+
+### Retrain when intents change
+
+The reranker is trained on *your* intents, so there is no incremental update:
+adding or renaming an intent means calling `fit` again. At these sizes that is
+seconds, so treat the model as a build artefact — retrain in CI when the data
+file changes and ship `model/` alongside your app.
+
+### Serving
+
+Load once at startup, not per request (`load` costs ~3 s). `predict_batch` is
+substantially cheaper per utterance than looping over `predict`. If you need
+sub-10 ms and can accept slightly weaker ranking, drop the reranker with
+`model.reranker = None` — `abstain` stays calibrated, because both thresholds
+are fitted at training time.
+
+### What it is not for
+
+Single-label, single-sentence routing is the whole design. It will not extract
+entities, handle "cancel my order and also update my address" as two intents,
+or classify long documents. It has no notion of conversation history — pass the
+turn you want classified, and keep state in your own graph.
 
 ## Layout
 
