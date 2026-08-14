@@ -52,23 +52,42 @@ CI or a container, cache that directory or the download repeats on every build.
 
 ## Quickstart (CLI)
 
+Bring your own `intents.jsonl` (see [Data format](#data-format)), or start from
+`examples/commerce_intents.jsonl` in this repo — the wheel ships the library
+only, not the example data:
+
+```bash
+curl -O https://raw.githubusercontent.com/bgokden/tinyintent/main/examples/commerce_intents.jsonl
+mv commerce_intents.jsonl intents.jsonl
+```
+
 ```bash
 uv run tinyintent train --data intents.jsonl --out model
 uv run tinyintent predict --model model "cancel my order"
 uv run tinyintent evaluate --model model --data intents.jsonl
 ```
 
-```
-> put my motorcycle up for sale
-  intent: sell  (score 0.87, confidence 0.79)
-  runners-up: buy 0.04, rent 0.04
-  nearest example: "list my bike for sale" (0.84)
+Real output from those three commands on that file:
 
-> what's the weather in berlin
-  intent: rent  (score 0.71, confidence 0.04)  ABSTAIN (below threshold)
-  runners-up: buy 0.16, sell 0.08
-  nearest example: "how much to rent a van" (0.31)
 ```
+Trained on 53 examples, 6 intents (encoder + head + reranker)
+Abstains below confidence 0.100
+Saved model to model
+
+> cancel my order
+  intent: cancel_order  (score 0.86, confidence 0.81)
+  runners-up: refund 0.07, track_order 0.03
+  nearest example: "cancel my order" (1.00)
+
+> what is the weather in berlin
+  intent: rent  (score 0.56, confidence 0.00)  ABSTAIN (below threshold)
+  runners-up: track_order 0.28, buy 0.10
+  nearest example: "I want to rent an apartment downtown" (0.49)
+```
+
+The second one is the reason there are two numbers. `score` says 0.56, which
+reads like a decision; `confidence` says 0.00, which correctly says nothing in
+this taxonomy fits a weather question.
 
 ## Quickstart (Python)
 
@@ -82,10 +101,11 @@ model.save("model")
 print(model.classify("I want my money back for order 883"))   # refund
 
 pred = model.predict("I want my money back for order 883")
-print(pred.intent, pred.confidence)  # refund 0.74  <- gate on this
-print(pred.score)                    # 0.80         <- ranks, does not calibrate
-print(pred.ranking[:3])              # ranked intents
-print(pred.explanation)              # nearest labelled example
+print(pred.intent, pred.confidence)  # refund 0.54  <- gate on this
+print(pred.score)                    # 0.79         <- ranks, does not calibrate
+print(pred.ranking[:3])              # [('refund', 0.79), ('cancel_order', 0.14), ...]
+print(pred.explanation)              # {'text': 'request a refund for order 883',
+                                     #  'similarity': 0.90}
 
 if pred.abstain:                     # set when trained with `oos` examples
     ask_for_clarification()
