@@ -57,7 +57,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Cache Hugging Face models
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/huggingface
           key: hf-${{ runner.os }}-bge-large-minilm
