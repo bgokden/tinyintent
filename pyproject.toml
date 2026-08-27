@@ -33,7 +33,7 @@ dependencies = [
     # train_dataloader=...), sentence-transformers' deprecated v2 compatibility
     # shim. It survives 3.x-5.x but is not a stable target, so a new major has
     # to be tested before it is allowed in.
-    "sentence-transformers>=3.0,<6",
+    "sentence-transformers>=3.0,<7",
     # Runtime, not dev: IntentModel.fit() always trains the cross-encoder
     # reranker, and on sentence-transformers >=4 that path routes through
     # CrossEncoderTrainer, which needs both of these. Without them the
